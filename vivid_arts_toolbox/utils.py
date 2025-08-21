@@ -98,12 +98,12 @@ def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_
     original_base_name = lod0_obj.name.replace("_LOD0", "")
 
     # Define the MLX filter content directly within the script
-    # This replaces the need for an external decimate_filter.mlx file
+    # IMPORTANT: Set TargetPerc value to "0.0" to ensure TargetFaceNum is respected.
     filter_template_content = """<!DOCTYPE FilterScript>
 <FilterScript>
  <filter name="Simplification: Quadric Edge Collapse Decimation (with texture)">
   <Param description="Target number of faces" value="{TARGET_FACE_COUNT}" type="RichInt" tooltip="" isxmlparam="0" name="TargetFaceNum"/>
-  <Param description="Percentage reduction (0..1)" value="0.4" type="RichFloat" tooltip="If non zero, this parameter specifies the desired final size of the mesh as a percentage of the initial mesh." isxmlparam="0" name="TargetPerc"/>
+  <Param description="Percentage reduction (0..1)" value="0.0" type="RichFloat" tooltip="If non zero, this parameter specifies the desired final size of the mesh as a percentage of the initial mesh." isxmlparam="0" name="TargetPerc"/>
   <Param description="Quality threshold" value="0.3" type="RichFloat" tooltip="Quality threshold for penalizing bad shaped faces.&lt;br>The value is in the range [0..1]&#xa; 0 accept any kind of face (no penalties),&#xa; 0.5  penalize faces with quality &lt; 0.5, proportionally to their shape&#xa;" isxmlparam="0" name="QualityThr"/>
   <Param description="Texture Weight" value="10" type="RichFloat" tooltip="Additional weight for each extra Texture Coordinates for every (selected) vertex" isxmlparam="0" name="Extratcoordw"/>
   <Param description="Preserve Boundary of the mesh" value="true" type="RichBool" tooltip="The simplification process tries not to destroy mesh boundaries" isxmlparam="0" name="PreserveBoundary"/>
