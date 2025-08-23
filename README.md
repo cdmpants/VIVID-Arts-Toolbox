@@ -1,8 +1,7 @@
 **Prerequisites:**  
 Blender 4.3  
 MeshLabServer 2020.06  
-Substance Designer  
-Substance Automation Toolkit  
+Substance Designer 15.0.1
 Optional: PyMeshLab (Can be used instead of MeshLabServer, which has been deprecated since 2020, but has not been tested).  
   
  After installation, the addon can be accessed from the N-Menu under VIVID Arts Toolbox.  
