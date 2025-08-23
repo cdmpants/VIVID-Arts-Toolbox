@@ -22,7 +22,7 @@ class VIVID_PT_bake_textures(Panel):
     bl_category   = "VIVID Arts Toolbox"
     bl_parent_id  = "VIVID_PT_main_panel"
     bl_label      = "Bake Textures"
-    bl_options    = {'DEFAULT_CLOSED'}
+
     bl_order      = 10
 
     def draw(self, context):
@@ -52,7 +52,7 @@ class VIVID_PT_generate_asset(Panel):
     bl_category   = "VIVID Arts Toolbox"
     bl_parent_id  = "VIVID_PT_main_panel"
     bl_label      = "Generate Asset"
-    bl_options    = {'DEFAULT_CLOSED'}
+
     bl_order      = 20
 
     def draw(self, context):
@@ -69,7 +69,7 @@ class VIVID_PT_setup_lods(Panel):
     bl_category   = "VIVID Arts Toolbox"
     bl_parent_id  = "VIVID_PT_main_panel"
     bl_label      = "Setup LODs"
-    bl_options    = {'DEFAULT_CLOSED'}
+
     bl_order      = 30
 
     def draw(self, context):
@@ -101,7 +101,7 @@ class VIVID_PT_export_asset(Panel):
     bl_category   = "VIVID Arts Toolbox"
     bl_parent_id  = "VIVID_PT_main_panel"
     bl_label      = "Export Asset"
-    bl_options    = {'DEFAULT_CLOSED'}
+
     bl_order      = 50
 
     def draw(self, context):

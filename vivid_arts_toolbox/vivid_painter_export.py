@@ -344,7 +344,7 @@ class VIVID_PT_ExportToPainter(bpy.types.Panel):
     bl_region_type = 'UI'
     bl_category = "VIVID Arts Toolbox"
     bl_idname = "VIVID_PT_EXPORT_TO_PAINTER"
-    bl_options = {'DEFAULT_CLOSED'}
+
     bl_order = 999  # try to keep it last
 
     def draw(self, context):

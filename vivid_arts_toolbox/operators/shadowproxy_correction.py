@@ -273,7 +273,7 @@ class VIEW3D_PT_shadowproxy_correction(bpy.types.Panel):
     bl_category  = "VIVID Arts Toolbox"   # SAME TAB as others
     bl_parent_id = "VIVID_PT_main_panel"  # CHILD FOLDOUT under main toolbox panel
     bl_label     = "ShadowProxy Correction"
-    bl_options   = {'DEFAULT_CLOSED'}
+
     bl_order     = 40                      # Above Export Asset (which is 50)
 
     def draw(self,context):
