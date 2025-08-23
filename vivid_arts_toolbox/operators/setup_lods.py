@@ -1,4 +1,18 @@
 import bpy
+
+# === VIVID: ShadowProxy naming helper ===
+def _vat_make_shadowproxy_name(obj_name: str) -> str:
+    """Insert '_ShadowProxy' immediately before the trailing _LOD suffix if present.
+    Examples:
+        'KAT_GroundFormation_11_LOD0' -> 'KAT_GroundFormation_11_ShadowProxy_LOD0'
+        'SomeMesh' -> 'SomeMesh_ShadowProxy'
+    """
+    import re
+    m = re.search(r'(.*)(_LOD\d+)$', obj_name)
+    if m:
+        return f"{m.group(1)}_ShadowProxy{m.group(2)}"
+    return f"{obj_name}_ShadowProxy"
+
 import os
 
 from bpy.props import BoolProperty
@@ -53,7 +67,6 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
         lods_dir = os.path.join(blend_dir, "LODs")
         os.makedirs(lods_dir, exist_ok=True)
 
-
         if self.generate_collider:
             self.report({'INFO'}, "Step 1: Generating Collider mesh...")
 
@@ -80,7 +93,6 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
         else:
             self.report({'INFO'}, "Skipping Collider generation as requested.")
 
-
         self.report({'INFO'}, "Step 2: Exporting LOD0 as DAE for LOD processing...")
         bpy.ops.object.select_all(action='DESELECT')
         lod0_obj.select_set(True)
@@ -93,7 +105,6 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
             apply_modifiers=True,
         )
         self.report({'INFO'}, f"Exported LOD0 DAE: {lod0_dae_filepath}")
-
 
         lod_generation_successful = False
         initial_face_count = len(lod0_obj.data.polygons)
@@ -110,11 +121,9 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 self.report({'WARNING'}, "Expected files: YOURASSETNAME_LOD1.dae, YOURASSETNAME_LOD2.dae, YOURASSETNAME_LOD3.dae")
                 return {'CANCELLED'}
 
-
         if not lod_generation_successful:
             self.report({'ERROR'}, "LOD generation failed. Check messages above for details.")
             return {'CANCELLED'}
-
 
         self.report({'INFO'}, "Step 4: Importing LOD1, LOD2, LOD3 from LOD generation output...")
         lod_names = []
@@ -129,10 +138,11 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 self.report({'ERROR'}, f"LOD file not found: {lod_filepath}. LOD generation (automated or manual) might have failed.")
                 return {'CANCELLED'}
 
-            bpy.ops.wm.collada_import(filepath=lod_filepath,
-                                        import_units=True,
-                                        find_chains=True,
-                                      )
+            bpy.ops.wm.collada_import(
+                filepath=lod_filepath,
+                import_units=True,
+                find_chains=True,
+            )
             imported_lod_obj = context.selected_objects[0] if context.selected_objects else None
             if imported_lod_obj:
                 imported_lod_obj.name = f"{original_base_name}{lod_suffix}"
@@ -157,7 +167,6 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                             material_to_append = mat_slot.material
                         else:
                             material_to_append = mat_slot 
-                        
                         if material_to_append:
                             imported_lod_obj.data.materials.append(material_to_append)
                         else:
@@ -171,7 +180,6 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 self.report({'ERROR'}, f"Failed to import {lod_file_name}.")
                 return {'CANCELLED'}
 
-
         self.report({'INFO'}, "Step 5: Adding Data Transfer modifiers to LOD1, LOD2, LOD3...")
         bpy.ops.object.select_all(action='DESELECT')
 
@@ -184,17 +192,15 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 context.view_layer.objects.active = lod_obj
 
                 data_transfer_mod = lod_obj.modifiers.new(name="DataTransfer", type='DATA_TRANSFER')
-                # Corrected properties based on the provided screenshot for Data Transfer:
                 data_transfer_mod.object = lod0_obj
-                data_transfer_mod.use_loop_data = True # Enable face corner data transfer
-                data_transfer_mod.data_types_loops = {'CUSTOM_NORMAL'} # Specify custom normals (plural 'loops')
-                data_transfer_mod.loop_mapping = 'POLYINTERP_LNORPROJ' # Corrected normal mapping method
+                data_transfer_mod.use_loop_data = True
+                data_transfer_mod.data_types_loops = {'CUSTOM_NORMAL'}
+                data_transfer_mod.loop_mapping = 'POLYINTERP_LNORPROJ'
 
                 self.report({'INFO'}, f"Added Data Transfer to {lod_obj.name}.")
                 bpy.ops.object.select_all(action='DESELECT')
             else:
                 self.report({'WARNING'}, f"Could not find {lod_obj_name} for Data Transfer. Skipping.")
-
 
         if self.generate_shadow_proxies:
             self.report({'INFO'}, "Step 6: Generating ShadowProxy meshes...")
@@ -209,38 +215,35 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                     bpy.ops.object.duplicate_move()
                     shadow_proxy_obj = context.active_object
 
-                    shadow_proxy_obj.name = f"ShadowProxy_{original_lod_obj.name}"
-                    shadow_proxy_obj.data.name = f"ShadowProxy_{original_lod_obj.data.name}"
+                    # FIXED: correct naming — insert _ShadowProxy before _LOD#
+                    shadow_proxy_obj.name = _vat_make_shadowproxy_name(original_lod_obj.name)
+                    shadow_proxy_obj.data.name = _vat_make_shadowproxy_name(original_lod_obj.data.name)
 
                     if shadow_proxy_obj.name not in asset_collection.objects:
                         asset_collection.objects.link(shadow_proxy_obj)
 
+                    # Keep decimate for proxies
                     decimate_mod_sp = shadow_proxy_obj.modifiers.new(name="Decimate_ShadowProxy", type='DECIMATE')
                     decimate_mod_sp.ratio = 0.2
                     decimate_mod_sp.use_collapse_triangulate = True
 
-                    displace_mod_sp = shadow_proxy_obj.modifiers.new(name="Displace_ShadowProxy", type='DISPLACE')
-                    displace_mod_sp.strength = -0.15
+                    # REMOVED: Displace modifier (creation/strength) — no longer used
 
                     self.report({'INFO'}, f"Generated ShadowProxy: {shadow_proxy_obj.name}")
         else:
             self.report({'INFO'}, "Skipping ShadowProxy generation as requested.")
 
         self.report({'INFO'}, "Step 7: Renaming UV maps (first to UVMap, second to Lightmap)...")
-        # Iterate through all mesh objects in the 'Asset' collection
         for obj in asset_collection.objects:
             if obj.type == 'MESH' and obj.data and obj.data.uv_layers:
                 uv_layers = obj.data.uv_layers
-                if len(uv_layers) > 0:
-                    # Rename the first UV layer to 'UVMap'
-                    if uv_layers[0].name != 'UVMap': # Only rename if it's not already correct
-                        uv_layers[0].name = 'UVMap'
-                        self.report({'INFO'}, f"Renamed first UV layer to UVMap for {obj.name}.")
-                if len(uv_layers) > 1:
-                    # Rename the second UV layer to 'Lightmap'
-                    if uv_layers[1].name != 'Lightmap': # Only rename if it's not already correct
-                        uv_layers[1].name = 'Lightmap'
-                        self.report({'INFO'}, f"Renamed second UV layer to Lightmap for {obj.name}.")
+                if len(uv_layers) > 0 and uv_layers[0].name != 'UVMap':
+                    uv_layers[0].name = 'UVMap'
+                    self.report({'INFO'}, f"Renamed first UV layer to UVMap for {obj.name}.")
+                if len(uv_layers) > 1 and uv_layers[1].name != 'Lightmap':
+                    uv_layers[1].name = 'Lightmap'
+                    self.report({'INFO'}, f"Renamed second UV layer to Lightmap for {obj.name}.")
 
         self.report({'INFO'}, "Setup LODs process completed.")
         return {'FINISHED'}
+
