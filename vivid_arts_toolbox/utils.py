@@ -1,7 +1,92 @@
 import bpy
 import os
 import subprocess
-import tempfile # Still needed for a temporary MLX to be written with specific target face count
+import tempfile
+import sys # Import sys to get the executable path of the current Blender instance
+
+
+def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count):
+    """
+    Generates LODs using meshlabserver.
+    Requires MeshLab Server to be installed and path configured in preferences.
+    """
+    prefs = context.preferences.addons[__package__.split('.')[0]].preferences
+
+    try:
+        meshlab_server_path = prefs.meshlab_executable_path
+    except AttributeError:
+        operator.report({'ERROR'}, "Addon preference 'meshlab_executable_path' not found. "
+                                   "Please ensure your addon preferences define the MeshLab Server Path "
+                                   "property with this exact name, or update utils.py with the correct name.")
+        return False
+
+    if not os.path.exists(meshlab_server_path) or not os.path.isfile(meshlab_server_path):
+        operator.report({'ERROR'}, f"MeshLab Server not found at: {meshlab_server_path}. Please set the correct path in addon preferences.")
+        return False
+
+    # Define target face counts based on initial_face_count
+    lod_targets = {
+        1: max(100, int(initial_face_count * 0.40)), # LOD1: 40% of initial, min 100 faces
+        2: max(50, int(initial_face_count * 0.16)),  # LOD2: 16% of initial, min 50 faces
+        3: max(20, int(initial_face_count * 0.064))  # LOD3: 6.4% of initial, min 20 faces
+    }
+
+    base_name = lod0_obj.name.replace("_LOD0", "") # Assuming LOD0 is the naming convention
+
+    temp_filter_file = None
+    try:
+        for i in range(1, 4):
+            target_face_count = lod_targets[i]
+            output_lod_name = f"{base_name}_LOD{i}.dae"
+            output_filepath = os.path.join(lods_dir, output_lod_name)
+
+            # Create a temporary MLX filter file with the dynamic target face count
+            temp_filter_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".mlx")
+            temp_filter_file.write(f"""<!DOCTYPE FilterScript>
+<FilterScript>
+ <filter name="Simplification: Quadric Edge Collapse Decimation (with texture)">
+  <Param description="Target number of faces" value="{target_face_count}" type="RichInt" name="TargetFaceNum"/>
+  <Param description="Quality threshold" value="0.5" type="RichFloat" name="QualityThr"/>
+  <Param description="Preserve Boundary of the mesh" value="true" type="RichBool" name="PreserveBoundary"/>
+  <Param description="Optimal position of simplified vertices" value="true" type="RichBool" name="OptimalPlacement"/>
+  <Param description="Preserve Normal" value="true" type="RichBool" name="PreserveNormal"/>
+ </filter>
+</FilterScript>""")
+            temp_filter_file.close() # Close the file so MeshLab can read it
+
+            meshlab_cmd = [
+                meshlab_server_path,
+                "-i", lod0_dae_filepath,
+                "-o", output_filepath,
+		"-m", "wt",
+                "-s", temp_filter_file.name # Use the temporary filter script
+            ]
+
+            operator.report({'INFO'}, f"Running MeshLab server for {output_lod_name} with target faces: {target_face_count}")
+            process = subprocess.run(meshlab_cmd, check=True, capture_output=True, text=True, cwd=lods_dir)
+            operator.report({'INFO'}, f"MeshLab server output for {output_lod_name}:\n{process.stdout}")
+            if process.stderr:
+                operator.report({'WARNING'}, f"MeshLab server warnings/errors for {output_lod_name}:\n{process.stderr}")
+
+        operator.report({'INFO'}, "MeshLab server processing completed for all LODs.")
+        return True
+
+    except FileNotFoundError:
+        operator.report({'ERROR'}, f"MeshLab server not found at '{meshlab_server_path}'. Please ensure the path is correct.")
+        operator.report({'ERROR'}, "You can set the MeshLab Server Path in the addon preferences (Edit > Preferences > Add-ons > VIVID Arts Toolbox).\nIf you are using Blender on Windows, the path should look like C:\\Program Files\\MeshLab\\meshlabserver.exe.")
+        return False
+    except subprocess.CalledProcessError as e:
+        operator.report({'ERROR'}, f"MeshLab server processing failed: {e}")
+        operator.report({'ERROR'}, f"MeshLab server Stdout: {e.stdout}")
+        operator.report({'ERROR'}, f"MeshLab server Stderr: {e.stderr}")
+        return False
+    except Exception as e:
+        operator.report({'ERROR'}, f"An unexpected error occurred during MeshLab server processing: {e}")
+        return False
+    finally:
+        if temp_filter_file and os.path.exists(temp_filter_file.name):
+            os.remove(temp_filter_file.name)
+
 
 def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count):
     """Helper function to encapsulate PyMeshLab logic."""
@@ -28,145 +113,483 @@ def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj,
         'LOD2': 0.16,
         'LOD3': 0.064
     }
-    
+
     original_base_name = lod0_obj.name.replace("_LOD0", "")
 
-    for i in range(1, 4):
-        lod_key = f"LOD{i}"
-        lod_suffix = f"_{lod_key}"
-        output_lod_name = f"{original_base_name}{lod_suffix}"
-        output_dae_filepath = os.path.join(lods_dir, f"{output_lod_name}.dae")
+    try:
+        ms.set_current_mesh(0)
+
+        for i in range(1, 4):
+            lod_suffix = f"_LOD{i}"
+            output_filename = f"{original_base_name}{lod_suffix}.dae"
+            output_filepath = os.path.join(lods_dir, output_filename)
+            target_percentage = lod_target_percentages[f'LOD{i}']
+            target_faces = max(1, int(initial_face_count * target_percentage))
+
+            ms.clone_current_mesh()
+            ms.set_current_mesh(ms.number_meshes() - 1)
+
+            ms.meshing_decimation_quadric_edge_collapse(
+                targetfacenum=target_faces,
+                qualitythr=0.5,
+                preserveboundary=True,
+                preservetopology=False,
+                preservenormal=True,
+                planarquadric=False,
+                selected=False
+            )
+            ms.save_current_current_mesh(output_filepath)
+
+            context.report({'INFO'}, f"Generated {output_filename} with target faces: {target_faces}")
+
+            ms.delete_current_mesh()
         
-        target_percentage = lod_target_percentages[lod_key]
-        target_face_count = int(initial_face_count * target_percentage)
-        
-        if target_face_count < 10: 
-            target_face_count = 10
-        
-        context.report({'INFO'}, f"Generating {output_lod_name} with target faces: {target_face_count}")
+        context.report({'INFO'}, "PyMeshLab processing completed for all LODs.")
+        return True
 
-        ms_current_pass = ml.MeshSet()
-        try:
-            ms_current_pass.load_new_mesh(lod0_dae_filepath)
-        except Exception as e:
-            context.report({'ERROR'}, f"Failed to re-load LOD0.dae for {output_lod_name} processing: {e}")
-            context.report({'ERROR'}, "Check if the DAE file is valid. Consult System Console.")
-            return False
-
-        try:
-            ms_current_pass.apply_filter('meshing.decimation_quadric_edge_collapse',
-                                          targetfacenum=target_face_count,
-                                          preserve_boundary=True,
-                                          preserve_uv=True,
-                                          quality_idx=0.3)
-            
-            ms_current_pass.save_current_mesh(output_dae_filepath, 
-                                             save_vertex_color=False, 
-                                             save_face_color=False,
-                                             save_vertex_normal=True,
-                                             save_face_normal=True,
-                                             save_texcoord=True)
-            context.report({'INFO'}, f"Successfully generated and saved: {output_lod_name}.dae")
-
-        except Exception as e:
-            context.report({'ERROR'}, f"PyMeshLab processing failed for {output_lod_name}: {e}")
-            context.report({'ERROR'}, "Please check the System Console for more details (Window > Toggle System Console).")
-            return False
-    
-    context.report({'INFO'}, "PyMeshLab processing completed for all LODs.")
-    return True
-
-
-def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count):
-    """Helper function to encapsulate meshlabserver.exe logic."""
-    prefs = context.preferences.addons[__package__.split('.')[0]].preferences
-    meshlab_exec_path = prefs.meshlab_executable_path
-    
-    if not meshlab_exec_path or not os.path.exists(meshlab_exec_path):
-        operator.report({'ERROR'}, f"MeshLab server not found at '{meshlab_exec_path}'.")
-        operator.report({'ERROR'}, "Please set the MeshLab Server Path in addon preferences or enable PyMeshLab automation.")
+    except Exception as e:
+        context.report({'ERROR'}, f"An error occurred during PyMeshLab LOD generation: {e}")
         return False
 
-    operator.report({'INFO'}, "Step 3: Automating LOD generation using meshlabserver.exe...")
 
-    lod_reductions = {
-        'LOD1': 0.4,
-        'LOD2': 0.16,
-        'LOD3': 0.064
-    }
+def bake_textures_headless_blender(operator, high_poly_filepath, low_poly_filepath, base_asset_name, output_dir, bake_types, resolution=2048, extrusion=0.1, cage_filepath=None):
+    """
+    Bakes textures from a high-poly object to a low-poly object using a headless Blender instance.
 
-    original_base_name = lod0_obj.name.replace("_LOD0", "")
+    Args:
+        operator: The Blender operator calling this function (for reporting).
+        high_poly_filepath (str): Full path to the high-poly FBX file.
+        low_poly_filepath (str): Full path to the low-poly FBX file.
+        base_asset_name (str): Base name for the output texture files.
+        output_dir (str): Directory to save the baked textures.
+        bake_types (list): List of bake types to perform (e.g., ['NORMAL', 'AO', 'DIFFUSE']).
+        resolution (int): Resolution of the baked textures (e.g., 2048).
+        extrusion (float): Cage extrusion distance for baking.
+        cage_filepath (str, optional): Full path to the cage FBX file.
+                                       If provided, this object will be used as the cage.
+                                       Otherwise, cage extrusion will be used.
 
-    # Define the MLX filter content directly within the script
-    # IMPORTANT: Set TargetPerc value to "0.0" to ensure TargetFaceNum is respected.
-    filter_template_content = """<!DOCTYPE FilterScript>
-<FilterScript>
- <filter name="Simplification: Quadric Edge Collapse Decimation (with texture)">
-  <Param description="Target number of faces" value="{TARGET_FACE_COUNT}" type="RichInt" tooltip="" isxmlparam="0" name="TargetFaceNum"/>
-  <Param description="Percentage reduction (0..1)" value="0.0" type="RichFloat" tooltip="If non zero, this parameter specifies the desired final size of the mesh as a percentage of the initial mesh." isxmlparam="0" name="TargetPerc"/>
-  <Param description="Quality threshold" value="0.3" type="RichFloat" tooltip="Quality threshold for penalizing bad shaped faces.&lt;br>The value is in the range [0..1]&#xa; 0 accept any kind of face (no penalties),&#xa; 0.5  penalize faces with quality &lt; 0.5, proportionally to their shape&#xa;" isxmlparam="0" name="QualityThr"/>
-  <Param description="Texture Weight" value="10" type="RichFloat" tooltip="Additional weight for each extra Texture Coordinates for every (selected) vertex" isxmlparam="0" name="Extratcoordw"/>
-  <Param description="Preserve Boundary of the mesh" value="true" type="RichBool" tooltip="The simplification process tries not to destroy mesh boundaries" isxmlparam="0" name="PreserveBoundary"/>
-  <Param description="Boundary Preserving Weight" value="1" type="RichFloat" tooltip="The importance of the boundary during simplification. Default (1.0) means that the boundary has the same importance of the rest. Values greater than 1.0 raise boundary importance and has the effect of removing less vertices on the border. Admitted range of values (0,+inf). " isxmlparam="0" name="BoundaryWeight"/>
-  <Param description="Optimal position of simplified vertices" value="true" type="RichBool" tooltip="Each collapsed vertex is placed in the position minimizing the quadric error.&#xa; It can fail (creating bad spikes) in case of very flat areas. &#xa;If disabled edges are collapsed onto one of the two original vertices and the final mesh is composed by a subset of the original vertices. " isxmlparam="0" name="OptimalPlacement"/>
-  <Param description="Preserve Normal" value="false" type="RichBool" tooltip="Try to avoid face flipping effects and try to preserve the original orientation of the surface" isxmlparam="0" name="PreserveNormal"/>
-  <Param description="Planar Simplification" value="false" type="RichBool" tooltip="Add additional simplification constraints that improves the quality of the simplification of the planar portion of the mesh." isxmlparam="0" name="PlanarQuadric"/>
-  <Param description="Simplify only selected faces" value="false" type="RichBool" tooltip="The simplification is applied only to the selected set of faces.&#xa; Take care of the target number of faces!" isxmlparam="0" name="Selected"/>
- </filter>
-</FilterScript>
-"""
+    Returns:
+        bool: True if baking was successful, False otherwise.
+    """
+    # Determine the Blender executable path
+    blender_python_executable = sys.executable # This is python.exe within Blender's installation
 
-    for i in range(1, 4):
-        lod_key = f"LOD{i}"
-        lod_suffix = f"_{lod_key}"
-        output_lod_name = f"{original_base_name}{lod_suffix}"
-        output_dae_filepath = os.path.join(lods_dir, f"{output_lod_name}.dae")
-        
-        target_percent = lod_reductions[lod_key]
-        target_face_count = int(initial_face_count * target_percent)
-        
-        if target_face_count < 10: 
-            target_face_count = 10 
-        
-        # Replace the placeholder with the actual target face count for this LOD
-        # A temporary MLX file is still needed because the targetfacenum parameter changes per LOD
-        specific_filter_content = filter_template_content.replace("{TARGET_FACE_COUNT}", str(target_face_count))
-        
-        temp_filter_file = None
-        try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.mlx', delete=False) as tf:
-                tf.write(specific_filter_content)
-                temp_filter_file = tf.name
+    blender_exec_path = None
+
+    # Heuristic for Blender executable path:
+    if sys.platform == "win32":
+        # On Windows, sys.executable is usually blender_install_dir\VERSION\python\bin\python.exe
+        # We need blender_install_dir\blender.exe
+        # Go up 4 levels: bin -> python -> VERSION -> Blender_Base_Folder
+        blender_base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(blender_python_executable))))
+        blender_exec_path = os.path.join(blender_base_dir, "blender.exe")
+    elif sys.platform.startswith("linux") or sys.platform == "darwin":
+        # On Linux/macOS, sys.executable might point to the Python interpreter inside the app bundle.
+        # We need to find the main 'blender' executable.
+        current_dir = os.path.dirname(blender_python_executable) # /.../python/bin
+        # Traverse up to find the main Blender executable.
+        # This heuristic is an educated guess and might need adjustment for specific Blender distributions.
+        for _ in range(4): # Check up to 4 levels up
+            # Look for a 'blender' executable in common locations (e.g., peer to 'python' dir, or within 'MacOS' on Darwin)
+            candidate_blender_path_linux = os.path.join(current_dir, 'blender')
+            candidate_blender_path_mac_app = os.path.join(current_dir, '..', '..', 'MacOS', 'Blender') # Common for macOS .app bundles
+
+            if os.path.exists(candidate_blender_path_linux) and os.path.isfile(candidate_blender_path_linux) and os.access(candidate_blender_path_linux, os.X_OK):
+                blender_exec_path = candidate_blender_path_linux
+                break
+            if os.path.exists(candidate_blender_path_mac_app) and os.path.isfile(candidate_blender_path_mac_app) and os.access(candidate_blender_path_mac_app, os.X_OK):
+                blender_exec_path = candidate_blender_path_mac_app
+                break
             
-            meshlab_cmd = [
-                meshlab_exec_path,
-                '-i', lod0_dae_filepath,
-                '-o', output_dae_filepath,
-                '-m', 'wt', # Only 'wt' for wedge texture coordinates (UVs)
-                '-s', temp_filter_file,
-            ]
+            # Move up one directory
+            current_dir = os.path.dirname(current_dir)
+            if current_dir == os.path.dirname(current_dir): # Reached root or cannot go further
+                break
+        
+        if not blender_exec_path:
+            # As a last resort, try using sys.executable directly if it happens to be the main binary
+            if os.path.exists(blender_python_executable) and os.path.isfile(blender_python_executable) and os.access(blender_python_executable, os.X_OK) and 'blender' in os.path.basename(blender_python_executable).lower():
+                blender_exec_path = blender_python_executable
 
-            operator.report({'INFO'}, f"Running MeshLab server for {output_lod_name} with target faces: {target_face_count}")
-            process = subprocess.run(meshlab_cmd, check=True, capture_output=True, text=True, cwd=lods_dir)
-            operator.report({'INFO'}, f"MeshLab server output for {output_lod_name}:\n{process.stdout}")
-            if process.stderr:
-                operator.report({'WARNING'}, f"MeshLab server warnings/errors for {output_lod_name}:\n{process.stderr}")
 
-        except FileNotFoundError:
-            operator.report({'ERROR'}, f"MeshLab server not found at '{meshlab_exec_path}'. Please ensure the path is correct.")
-            operator.report({'ERROR'}, "You can set the MeshLab Server Path in the addon preferences (Edit > Preferences > Add-ons > VIVID Arts Toolbox).")
-            return False
-        except subprocess.CalledProcessError as e:
-            operator.report({'ERROR'}, f"MeshLab server processing failed for {output_lod_name}: {e}")
-            operator.report({'ERROR'}, f"MeshLab server Stdout: {e.stdout}")
-            operator.report({'ERROR'}, f"MeshLab server Stderr: {e.stderr}")
-            return False
-        except Exception as e:
-            operator.report({'ERROR'}, f"An unexpected error occurred during MeshLab server processing for {output_lod_name}: {e}")
-            return False
-        finally:
-            if temp_filter_file and os.path.exists(temp_filter_file):
-                os.remove(temp_filter_file)
+    if not blender_exec_path or not os.path.exists(blender_exec_path):
+        operator.report({'ERROR'}, f"Blender executable not found. Derived path: '{blender_exec_path}'. Please verify your Blender installation and permissions.")
+        return False
 
-    operator.report({'INFO'}, "MeshLab server processing completed for all LODs.")
-    return True
+    # Create the temporary baking script that the headless Blender will run
+    # This script still needs to be temporary as it's generated for execution.
+    temp_script_path = os.path.join(tempfile.gettempdir(), "blender_bake_script.py")
+
+    # Define the baking script content as a regular triple-quoted string
+    # All f-string curly braces inside this content need to be escaped by doubling them
+    baking_script_content = """
+import bpy
+import os
+import sys
+
+# Get arguments passed from the main script via '--'
+try:
+    args_index = sys.argv.index("--")
+    high_poly_file = sys.argv[args_index + 1]
+    low_poly_file = sys.argv[args_index + 2]
+    output_folder = sys.argv[args_index + 3] # This is now the permanent output folder
+    base_name = sys.argv[args_index + 4]
+    bake_types_str = sys.argv[args_index + 5]
+    resolution = int(sys.argv[args_index + 6])
+    extrusion = float(sys.argv[args_index + 7])
+    # Check if cage_file argument exists and is not "None"
+    cage_file = sys.argv[args_index + 8] if len(sys.argv) > args_index + 8 and sys.argv[args_index + 8] != "None" else None
+
+    bake_types = bake_types_str.split(',')
+except (ValueError, IndexError) as e:
+    print(f"ERROR: Missing or invalid arguments for baking script: {{e}}")
+    sys.stdout.flush()
+    sys.exit(1)
+
+# Clear default scene to ensure a clean slate for import
+bpy.ops.wm.read_factory_settings(use_empty=True)
+sys.stdout.flush()
+
+print(f"INFO: Baking process started in headless Blender...")
+sys.stdout.flush()
+print(f"INFO: High poly file argument: {{high_poly_file}}")
+sys.stdout.flush()
+print(f"INFO: Low poly file argument: {{low_poly_file}}")
+sys.stdout.flush()
+print(f"INFO: Output folder (permanent): {{output_folder}}")
+sys.stdout.flush()
+print(f"INFO: Base name: {{base_name}}")
+sys.stdout.flush()
+print(f"INFO: Bake types: {{bake_types}}")
+sys.stdout.flush()
+print(f"INFO: Resolution: {{resolution}}")
+sys.stdout.flush()
+print(f"INFO: Extrusion: {{extrusion}}")
+sys.stdout.flush()
+print(f"INFO: Cage file argument: {{cage_file}}")
+sys.stdout.flush()
+
+
+high_poly_obj = None
+low_poly_obj = None
+cage_obj = None
+
+try:
+    # Import High Poly object
+    print(f"INFO: Checking if high poly file exists: {{high_poly_file}}")
+    sys.stdout.flush()
+    if not os.path.exists(high_poly_file):
+        print(f"ERROR: High poly file not found: {{high_poly_file}}")
+        sys.stdout.flush()
+        sys.exit(1)
+    try:
+        print(f"INFO: Importing high poly FBX: {{high_poly_file}}")
+        sys.stdout.flush()
+        bpy.ops.import_scene.fbx(filepath=high_poly_file)
+        sys.stdout.flush()
+        
+        imported_high_poly_meshes = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH' and obj.name.startswith(os.path.basename(high_poly_file).split('.')[0])]
+        if imported_high_poly_meshes:
+            high_poly_obj = imported_high_poly_meshes[0]
+            high_poly_obj.hide_set(True) # Hide from viewport
+            high_poly_obj.hide_render = False # Ensure it's rendered for baking
+            print(f"INFO: Imported high poly object: {{high_poly_obj.name}}")
+            sys.stdout.flush()
+        else:
+            print(f"ERROR: High poly object not found in scene after import from {{high_poly_file}}. Check if the FBX file contains mesh data or if the naming convention is unexpected.")
+            sys.stdout.flush()
+            sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: Failed to import high poly FBX '{{high_poly_file}}': {{e}}")
+        sys.stdout.flush()
+        sys.exit(1)
+
+
+    # Import Low Poly object
+    print(f"INFO: Checking if low poly file exists: {{low_poly_file}}")
+    sys.stdout.flush()
+    if not os.path.exists(low_poly_file):
+        print(f"ERROR: Low poly file not found: {{low_poly_file}}")
+        sys.stdout.flush()
+        sys.exit(1)
+    try:
+        print(f"INFO: Importing low poly FBX: {{low_poly_file}}")
+        sys.stdout.flush()
+        bpy.ops.import_scene.fbx(filepath=low_poly_file)
+        sys.stdout.flush()
+        imported_low_poly_meshes = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH' and obj.name.startswith(os.path.basename(low_poly_file).split('.')[0])]
+        if imported_low_poly_meshes:
+            low_poly_obj = imported_low_poly_meshes[0]
+            print(f"INFO: Imported low poly object: {{low_poly_obj.name}}")
+            sys.stdout.flush()
+        else:
+            print(f"ERROR: Low poly object not found in scene after import from {{low_poly_file}}. Check if the FBX file contains mesh data or if the naming convention is unexpected.")
+            sys.stdout.flush()
+            sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: Failed to import low poly FBX '{{low_poly_file}}': {{e}}")
+        sys.stdout.flush()
+        sys.exit(1)
+
+
+    # Import Cage Mesh if specified
+    if cage_file:
+        print(f"INFO: Checking if cage file exists: {{cage_file}}")
+        sys.stdout.flush()
+        if not os.path.exists(cage_file):
+            print(f"WARNING: Specified cage file does not exist: {{cage_file}}. Skipping cage import and using extrusion distance only.")
+            sys.stdout.flush()
+        else:
+            try:
+                print(f"INFO: Importing cage FBX: {{cage_file}}")
+                sys.stdout.flush()
+                bpy.ops.import_scene.fbx(filepath=cage_file)
+                sys.stdout.flush()
+                imported_cage_meshes = [obj for obj in bpy.context.scene.objects if obj.type == 'MESH' and obj.name.startswith(os.path.basename(cage_file).split('.')[0])]
+                if imported_cage_meshes:
+                    cage_obj = imported_cage_meshes[0]
+                    cage_obj.hide_set(True) # Hide from viewport
+                    cage_obj.hide_render = False # Ensure it's rendered for baking
+                    print(f"INFO: Imported cage mesh object: {{cage_obj.name}}")
+                    sys.stdout.flush()
+                else:
+                    print(f"WARNING: Cage object not found in scene after import from {{cage_file}}. Ensure FBX contains mesh data or naming convention is expected.")
+                    sys.stdout.flush()
+            except Exception as e:
+                print(f"WARNING: Failed to import cage FBX '{{cage_file}}': {{e}}. Proceeding without cage object.")
+                sys.stdout.flush()
+    else:
+        print(f"INFO: No cage file specified. Baking will proceed using only extrusion distance.")
+        sys.stdout.flush()
+
+
+    # Set up low poly for baking
+    print(f"INFO: Setting up low poly object '{{low_poly_obj.name}}' for baking...")
+    sys.stdout.flush()
+    bpy.context.view_layer.objects.active = low_poly_obj
+    low_poly_obj.select_set(True)
+    sys.stdout.flush()
+
+    # Ensure low-poly has a UV map, create one if not present
+    if not low_poly_obj.data.uv_layers:
+        low_poly_obj.data.uv_layers.new(name="BakeUV")
+        print("INFO: Created new UV layer 'BakeUV' for low poly object.")
+        sys.stdout.flush()
+    else:
+        print(f"INFO: Low poly object already has UV layers. Using active UV layer: {{low_poly_obj.data.uv_layers.active.name}}")
+        sys.stdout.flush()
+
+
+    # Create or get a material for the low poly object
+    if not low_poly_obj.data.materials:
+        mat = bpy.data.materials.new(name="Bake_Material")
+        low_poly_obj.data.materials.append(mat)
+        print("INFO: Created new material 'Bake_Material' for low poly object.")
+        sys.stdout.flush()
+    else:
+        mat = low_poly_obj.data.materials[0]
+        print(f"INFO: Using existing material '{{mat.name}}' for low poly object.")
+        sys.stdout.flush()
+
+    # Ensure material uses nodes for baking
+    if not mat.node_tree:
+        mat.use_nodes = True
+        print("INFO: Enabled node tree for material.")
+        sys.stdout.flush()
+    else:
+        print("INFO: Material already uses nodes.")
+        sys.stdout.flush()
+
+    # Ensure Cycles is the render engine for baking
+    bpy.context.scene.render.engine = 'CYCLES'
+    print("INFO: Render engine set to Cycles.")
+    sys.stdout.flush()
+    try:
+        # Prefer GPU if available for faster baking
+        bpy.context.scene.cycles.device = 'GPU'
+        print("INFO: Cycles device set to GPU.")
+        sys.stdout.flush()
+    except RuntimeError:
+        print("WARNING: GPU device not available for Cycles, falling back to CPU.")
+        bpy.context.scene.cycles.device = 'CPU' # Explicitly set to CPU if GPU fails
+        sys.stdout.flush()
+    
+    # Set common bake settings
+    bpy.context.scene.cycles.bake_selected_to_active = True
+    bpy.context.scene.cycles.bake_cage_extrusion = extrusion
+    if cage_obj:
+        bpy.context.scene.cycles.bake_cage_object = cage_obj
+        print(f"INFO: Using cage object: {{cage_obj.name}} for baking.")
+        sys.stdout.flush()
+    else:
+        bpy.context.scene.cycles.bake_cage_object = None
+        print(f"INFO: Using cage extrusion: {{extrusion}} for baking.")
+        sys.stdout.flush()
+
+    # Select both high and low poly for baking (high poly first for 'selected to active')
+    bpy.ops.object.select_all(action='DESELECT')
+    high_poly_obj.select_set(True) # Source object
+    low_poly_obj.select_set(True) # Target object (also selected)
+    bpy.context.view_layer.objects.active = low_poly_obj # Active object must be the target
+    print(f"INFO: High poly ('{{high_poly_obj.name}}') and low poly ('{{low_poly_obj.name}}') selected, low poly is active.")
+    sys.stdout.flush()
+
+
+    # Loop through bake types and perform baking
+    for bake_type in bake_types:
+        print(f"INFO: Baking type: {{bake_type}}...")
+        sys.stdout.flush()
+        
+        # Consistent image name based on base_name and bake_type
+        img_name = f"{{base_name}}_{{bake_type.lower()}}"
+        # Output directly to the specified output_folder (BakeTextures)
+        output_image_filepath = os.path.join(output_folder, f"{{img_name}}.png")
+
+        print(f"INFO: Creating image: {{img_name}} at resolution {{resolution}}x{{resolution}}.")
+        sys.stdout.flush()
+        # Blender's image data block should reference the *final* output path
+        img = bpy.data.images.new(img_name, width=resolution, height=resolution)
+        img.filepath_raw = output_image_filepath
+        img.file_format = 'PNG'
+        img.alpha_mode = 'NONE' # Most bake types don't need alpha for output
+        sys.stdout.flush()
+
+        # Remove any previously created bake image nodes in the material to ensure clean state for current bake
+        nodes = mat.node_tree.nodes
+        for node in nodes:
+            if node.type == 'TEX_IMAGE' and node.image and node.image.name.startswith(base_name):
+                print(f"INFO: Removing old texture node: {{node.name}}")
+                nodes.remove(node)
+        sys.stdout.flush()
+
+        texture_node = nodes.new('ShaderNodeTexImage')
+        texture_node.image = img
+        texture_node.location = 0, 0 # Arbitrary location for the node
+        print(f"INFO: Created new image texture node: {{texture_node.name}}.")
+        sys.stdout.flush()
+        
+        # Critically, this node MUST be selected and active for bpy.ops.object.bake() to know where to bake
+        # Re-ensure selection and active object state
+        bpy.ops.object.select_all(action='DESELECT')
+        low_poly_obj.select_set(True)
+        high_poly_obj.select_set(True)
+        bpy.context.view_layer.objects.active = low_poly_obj
+        
+        texture_node.select = True
+        mat.node_tree.nodes.active = texture_node # Make the image texture node active for baking
+        print(f"INFO: Image texture node '{{texture_node.name}}' is selected and active for material '{{mat.name}}'.")
+        sys.stdout.flush()
+
+        bpy.context.scene.cycles.bake_type = bake_type
+        print(f"INFO: Cycles bake type set to '{{bake_type}}'.")
+        sys.stdout.flush()
+
+        # Specific settings per bake type
+        if bake_type == 'NORMAL':
+            bpy.context.scene.cycles.bake_normal_space = 'TANGENT' 
+            bpy.context.scene.cycles.bake_normal_map_type = 'NORMAL_MAP' 
+            print("INFO: Normal bake settings applied (Tangent Space, Normal Map type).")
+        elif bake_type == 'AO':
+            bpy.context.scene.cycles.bake_ao_samples = 64
+            print("INFO: AO bake settings applied (64 samples).")
+        elif bake_type == 'DIFFUSE':
+            bpy.context.scene.cycles.bake_diffuse_direct = False # Only bake color, not lighting
+            bpy.context.scene.cycles.bake_diffuse_indirect = False
+            bpy.context.scene.cycles.bake_diffuse_color = True
+            img.colorspace_settings.name = 'sRGB' # For color maps
+            print("INFO: Diffuse bake settings applied (Color only, sRGB colorspace).")
+        elif bake_type == 'EMISSION':
+            bpy.context.scene.cycles.bake_emission = True
+            print("INFO: Emission bake settings applied.")
+        elif bake_type == 'ROUGHNESS':
+            bpy.context.scene.cycles.bake_direct = False
+            bpy.context.scene.cycles.bake_indirect = False
+            bpy.context.scene.cycles.bake_color = False
+            bpy.context.scene.cycles.bake_glossy = True # Capture glossy component for roughness
+            print("INFO: Roughness bake settings applied (Glossy only).")
+        elif bake_type == 'METALLIC':
+            bpy.context.scene.cycles.bake_direct = False
+            bpy.context.scene.cycles.bake_indirect = False
+            bpy.context.scene.cycles.bake_color = False
+            bpy.context.scene.cycles.bake_metallic = True # Capture metallic component
+            print("INFO: Metallic bake settings applied.")
+        elif bake_type == 'OPACITY':
+            bpy.context.scene.cycles.bake_direct = False
+            bpy.context.scene.cycles.bake_indirect = False
+            bpy.context.scene.cycles.bake_color = False
+            bpy.context.scene.cycles.bake_alpha = True # Capture alpha/opacity
+            print("INFO: Opacity bake settings applied.")
+        elif bake_type == 'COMBINED':
+            print("INFO: Combined bake type selected.")
+        sys.stdout.flush()
+
+        try:
+            print(f"INFO: Attempting to bake '{{bake_type}}'...")
+            sys.stdout.flush()
+            bpy.ops.object.bake(type=bake_type)
+            # CRITICAL FIX: Save the image after baking
+            img.save() 
+            print(f"INFO: Successfully baked and saved '{{bake_type}}' to '{{img.filepath_raw}}'")
+            sys.stdout.flush()
+        except RuntimeError as e:
+            print(f"ERROR: Error during '{{bake_type}}' bake: {{e}}")
+            sys.stdout.flush()
+            sys.exit(1)
+
+    print("INFO: Baking process finished successfully in headless Blender.")
+    sys.stdout.flush()
+    sys.exit(0)
+
+except Exception as e:
+    print(f"CRITICAL ERROR: An unexpected error occurred in the baking script: {{e}}")
+    sys.stdout.flush()
+    sys.exit(1)
+"""
+    # Now, assign the baking script content directly, as all internal f-strings are escaped
+    formatted_baking_script = baking_script_content 
+
+    with open(temp_script_path, "w") as f:
+        f.write(formatted_baking_script)
+
+    command = [
+        blender_exec_path,
+        "--background", # Run Blender in background mode without GUI
+        "--python", temp_script_path, # Execute the temporary Python script
+        "--", # Separator for arguments to be passed to the Python script
+        high_poly_filepath,
+        low_poly_filepath,
+        output_dir, # This is the permanent output_dir (BakeTextures)
+        base_asset_name,
+        ",".join(bake_types),
+        str(resolution),
+        str(extrusion),
+        cage_filepath if cage_filepath else "None" # Pass "None" string if no cage
+    ]
+
+    operator.report({'INFO'}, f"Executing Blender headless command: {' '.join(command)}")
+
+    try:
+        process = subprocess.run(command, check=True, capture_output=True, text=True, cwd=output_dir)
+        operator.report({'INFO'}, f"Blender headless output:\n{process.stdout}")
+        if process.stderr:
+            operator.report({'WARNING'}, f"Blender headless warnings/errors:\n{process.stderr}")
+        operator.report({'INFO'}, "Texture baking completed successfully.")
+        return True
+    except FileNotFoundError:
+        operator.report({'ERROR'}, f"Blender executable not found at '{blender_exec_path}'. "
+                                   f"This is unexpected. Please report this issue.")
+        return False
+    except subprocess.CalledProcessError as e:
+        operator.report({'ERROR'}, f"Blender headless baking failed with exit code {e.returncode}: {e}")
+        operator.report({'ERROR'}, f"Blender Stdout: {e.stdout}")
+        operator.report({'ERROR'}, f"Blender Stderr: {e.stderr}")
+        return False
+    except Exception as e:
+        operator.report({'ERROR'}, f"An unexpected error occurred during Blender headless baking: {e}")
+        return False
+    finally:
+        # The temporary script itself still needs to be cleaned up
+        if os.path.exists(temp_script_path):
+            os.remove(temp_script_path)
+

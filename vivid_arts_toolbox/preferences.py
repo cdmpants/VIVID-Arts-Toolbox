@@ -1,5 +1,12 @@
 import bpy
+import os
 from bpy.props import StringProperty, BoolProperty
+
+# Get the directory of the current script (preferences.py)
+# This assumes preferences.py is directly inside the addon's root folder.
+# If it's in a subfolder, you might need to adjust:
+# e.g., os.path.dirname(os.path.dirname(__file__)) to go up two levels.
+addon_dir = os.path.dirname(__file__)
 
 class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
@@ -13,7 +20,10 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
     designer_preset_filepath: StringProperty(
         name="Designer JSON Preset",
         subtype='FILE_PATH',
-        description="Path to your Substance Designer JSON preset file."
+        # Set the default path to the SDesigner_Photogrammetry.json file
+        # located within the addon's root directory.
+        default=os.path.join(addon_dir, "SDesigner_Photogrammetry.json"),
+        description="Path to your Substance Designer JSON preset file. Defaults to local addon file."
     )
     meshlab_executable_path: StringProperty(
         name="MeshLab Server Path (Optional)",
@@ -21,9 +31,16 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
         description="Full path to meshlabserver.exe. Used if PyMeshLab automation is disabled or fails.",
         default=""
     )
+    # New in preferences.py (inside VIVID_Arts_Toolbox_Preferences)
+    substance_baker_path: StringProperty(
+        name="Substance Baker (substance3d_baker.exe)",
+        description="Path to Adobe Substance 3D Designer's headless baker executable",
+        subtype='FILE_PATH',
+        default=""
+    )
     enable_pymeshlab_automation: BoolProperty(
         name="Enable PyMeshLab Automation",
-        default=True,
+        default=False, # CHANGED: PyMeshLab automation is now disabled by default
         description="Use PyMeshLab library for LOD generation (requires installation). Disable for manual MeshLab or meshlabserver.exe fallback."
     )
 
@@ -31,7 +48,7 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
         layout = self.layout
         layout.label(text="VIVID Arts Toolbox Settings")
         layout.prop(self, "asset_destination_path")
-        layout.prop(self, "designer_preset_filepath")
+        layout.prop(self, "substance_baker_path")
         
         layout.separator()
         layout.label(text="LOD Generation Options:", icon='INFO')
