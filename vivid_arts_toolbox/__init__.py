@@ -24,8 +24,9 @@ from .operators.setup_lods import VIVID_OT_setup_lods
 from .operators.export_asset import VIVID_OT_export_asset
 from .operators.warning_dialog import VIVID_OT_warning_dialog
 
-# ShadowProxy Correction module (has its own register() that adds its panel + scene props)
+# Modules with their own register() functions
 from .operators import shadowproxy_correction
+from .operators import light_removal   # <<< ADDED
 
 # Classes that need bpy.utils.register_class(...)
 _classes = (
@@ -52,19 +53,20 @@ def register():
         bpy.types.Scene.vivid_warning_callback_id = StringProperty(default="")
 
     # Bake Textures (creates scene.vivid_designer_bake and registers VIVID_OT_bake_designer)
-    # NOTE: bake_textures.py exposes custom functions, not register()
     bake_textures.register_designer_bake()
 
     # Panels (UI foldouts)
     panel.register()
 
-    # ShadowProxy Correction (its module handles its own scene props + subpanel)
+    # Modules with custom register()
     shadowproxy_correction.register()
+    light_removal.register()   # <<< ADDED
 
     print("VIVID Arts Toolbox Registered!")
 
 def unregister():
     # Unregister in reverse order
+    light_removal.unregister()  # <<< ADDED
     shadowproxy_correction.unregister()
     panel.unregister()
 
@@ -76,7 +78,7 @@ def unregister():
     if hasattr(bpy.types.Scene, "vivid_warning_callback_id"):
         del bpy.types.Scene.vivid_warning_callback_id
 
-    # Undo Designer bake registration (removes scene.vivid_designer_bake)
+    # Undo Designer bake registration
     bake_textures.unregister_designer_bake()
 
     for cls in reversed(_classes):

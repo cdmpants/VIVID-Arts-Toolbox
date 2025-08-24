@@ -408,3 +408,37 @@ def unregister_designer_bake():
         del bpy.types.Scene.vivid_designer_bake
     for c in reversed(CLASSES):
         bpy.utils.unregister_class(c)
+
+# ------------------------------------------------------------
+# Extended baked texture finder (fix for Light Removal)
+# ------------------------------------------------------------
+def _find_baked_textures_ex(bake_tex_dir):
+    """
+    Returns (dlbc_path, normal_path, dlao_path, dlbn_path).
+    - Normal path excludes Bent_Normals on purpose.
+    """
+    if not os.path.isdir(bake_tex_dir):
+        return None, None, None, None
+
+    normal_path = None
+    for fn in sorted(os.listdir(bake_tex_dir)):
+        lower = fn.lower()
+        if lower.endswith((".png",".tga",".jpg",".jpeg",".exr",".tif",".tiff",".bmp",".webp")):
+            if "bent" in lower and "normal" in lower:
+                continue
+            if "_normal" in lower or "_normals" in lower:
+                normal_path = os.path.join(bake_tex_dir, fn)
+                break
+
+    dlbc = None; dlao = None; dlbn = None
+    for fn in sorted(os.listdir(bake_tex_dir)):
+        lower = fn.lower()
+        full = os.path.join(bake_tex_dir, fn)
+        if any(k in lower for k in ["_dlbc","basecolor","base_color","albedo"]):
+            dlbc = dlbc or full
+        if "_dlao" in lower or (("ao" in lower) and ("dl" in lower)):
+            dlao = dlao or full
+        if "_dlbn" in lower or ("bent" in lower and "normal" in lower):
+            dlbn = dlbn or full
+    return dlbc, normal_path, dlao, dlbn
+
