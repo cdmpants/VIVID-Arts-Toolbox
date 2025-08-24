@@ -22,9 +22,7 @@ class VIVID_PT_bake_textures(Panel):
     bl_category   = "VIVID Arts Toolbox"
     bl_parent_id  = "VIVID_PT_main_panel"
     bl_label      = "Bake Textures"
-
     bl_order      = 10
-
     def draw(self, context):
         layout = self.layout
         s = getattr(context.scene, "vivid_designer_bake", None)
@@ -52,9 +50,7 @@ class VIVID_PT_generate_asset(Panel):
     bl_category   = "VIVID Arts Toolbox"
     bl_parent_id  = "VIVID_PT_main_panel"
     bl_label      = "Generate Asset"
-
     bl_order      = 20
-
     def draw(self, context):
         layout = self.layout
         col = layout.column(align=True)
@@ -69,9 +65,7 @@ class VIVID_PT_setup_lods(Panel):
     bl_category   = "VIVID Arts Toolbox"
     bl_parent_id  = "VIVID_PT_main_panel"
     bl_label      = "Setup LODs"
-
     bl_order      = 30
-
     def draw(self, context):
         layout = self.layout
         box = layout.box()
@@ -92,8 +86,7 @@ class VIVID_PT_setup_lods(Panel):
         else:
             col.label(text="Operator vivid.setup_lods not registered.", icon='ERROR')
 
-# ShadowProxy Correction lives in operators/shadowproxy_correction.py
-# It uses bl_parent_id="VIVID_PT_main_panel" and bl_order=40 (above Export Asset)
+# ShadowProxy Correction lives in operators/shadowproxy_correction.py (order ~40 above Export Asset)
 
 class VIVID_PT_export_asset(Panel):
     bl_space_type = 'VIEW_3D'
@@ -101,9 +94,7 @@ class VIVID_PT_export_asset(Panel):
     bl_category   = "VIVID Arts Toolbox"
     bl_parent_id  = "VIVID_PT_main_panel"
     bl_label      = "Export Asset"
-
     bl_order      = 50
-
     def draw(self, context):
         layout = self.layout
         col = layout.column(align=True)
@@ -112,12 +103,42 @@ class VIVID_PT_export_asset(Panel):
         else:
             col.label(text="Operator vivid.export_asset not registered.", icon='ERROR')
 
+# NEW — Export to Painter (default OPEN because we don't set DEFAULT_CLOSED)
+class VIVID_PT_export_to_painter(Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category   = "VIVID Arts Toolbox"
+    bl_parent_id  = "VIVID_PT_main_panel"
+    bl_label      = "Export to Painter"
+    bl_order      = 60
+    def draw(self, context):
+        layout = self.layout
+        v = getattr(context.scene, "vivid_export_to_painter", None)
+
+        box = layout.box()
+        row = box.row(align=True)
+        if v:
+            row.prop(v, "texture_res", text="Texture Resolution")
+            row = box.row(align=True)
+            row.prop(v, "is_surface", text="Is Surface")
+            row = box.row(align=True)
+            row.prop(v, "open_after", text="Open Painter after export")
+        else:
+            box.label(text="Export-to-Painter props not found (scene.vivid_export_to_painter).", icon='INFO')
+
+        col = layout.column(align=True)
+        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "export_to_painter"):
+            col.operator("vivid.export_to_painter", text="Export to Painter", icon='EXPORT')
+        else:
+            col.label(text="Operator vivid.export_to_painter not registered.", icon='ERROR')
+
 _classes = (
     VIVID_PT_main_panel,
     VIVID_PT_bake_textures,
     VIVID_PT_generate_asset,
     VIVID_PT_setup_lods,
     VIVID_PT_export_asset,
+    VIVID_PT_export_to_painter,  # NEW: added last so it appears at the bottom
 )
 
 def register():
@@ -127,4 +148,3 @@ def register():
 def unregister():
     for c in reversed(_classes):
         bpy.utils.unregister_class(c)
-

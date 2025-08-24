@@ -2,7 +2,7 @@
 bl_info = {
     "name": "VIVID Arts Toolbox",
     "author": "Christopher/VIVID Arts",
-    "version": (1, 0, 0),
+    "version": (1, 0, 1),  # bumped
     "blender": (4, 3, 0),
     "location": "3D Viewport > N Panel > VIVID Arts Toolbox",
     "description": "Automates photogrammetry processing for video games with Blender, MeshLab, and Substance Designer.",
@@ -26,7 +26,9 @@ from .operators.warning_dialog import VIVID_OT_warning_dialog
 
 # Modules with their own register() functions
 from .operators import shadowproxy_correction
-from .operators import light_removal   # <<< ADDED
+from .operators import light_removal   # existing
+# NEW: Export to Painter (self-registering like your other modules)
+from . import export_to_painter
 
 # Classes that need bpy.utils.register_class(...)
 _classes = (
@@ -60,13 +62,19 @@ def register():
 
     # Modules with custom register()
     shadowproxy_correction.register()
-    light_removal.register()   # <<< ADDED
+    light_removal.register()
+
+    # NEW: Export to Painter props/op (adds scene.vivid_export_to_painter and operator)
+    export_to_painter.register()
 
     print("VIVID Arts Toolbox Registered!")
 
 def unregister():
+    # NEW: Export to Painter
+    export_to_painter.unregister()
+
     # Unregister in reverse order
-    light_removal.unregister()  # <<< ADDED
+    light_removal.unregister()
     shadowproxy_correction.unregister()
     panel.unregister()
 
@@ -85,5 +93,3 @@ def unregister():
         bpy.utils.unregister_class(cls)
 
     print("VIVID Arts Toolbox Unregistered!")
-
-
