@@ -374,13 +374,12 @@ class VIVID_OT_bake_designer(Operator):
         # --- Stop timer ---
         duration = time.time() - start_time
 
-        # Optional material setup
+        
+        # Optional material setup (Delighter only)
         if settings and settings.setup_material:
             opt_obj = _find_optimized_object()
             if opt_obj:
-                base_name = _remove_suffix(opt_obj.name, "_Optimized")
-                dlbc_path, normal_path = _find_baked_textures(bake_tex)
-                _ensure_material(opt_obj, base_name, dlbc_path, normal_path)
+                _append_delighter_material(opt_obj, bake_tex)
             else:
                 self.report({'WARNING'}, "No *_Optimized object found to assign material.")
 
@@ -389,6 +388,127 @@ class VIVID_OT_bake_designer(Operator):
         else:
             self.report({'INFO'}, f"Designer baking complete in {duration:.1f}s → {bake_tex}")
         return {'FINISHED'}
+
+
+
+
+
+# ------------------------------------------------------------
+# Delighter material import + setup (must run after baking)
+# ------------------------------------------------------------
+
+def _append_delighter_material(obj, bake_tex_dir):
+    """
+    Appends 'Delighter' material from Delighter.blend (bundled with addon)
+    and assigns baked textures:
+      - Node 'DLBC'      -> *_DLBC.*     (sRGB)
+      - Node 'DLAO'      -> *_DLAO.*     (Non-Color)
+      - Node 'DLBN'      -> *_DLBN.*     (Non-Color)
+      - Node 'Normals'   -> *_Normal(s).* (Non-Color, excludes Bent_Normals)
+    Replaces existing material slots with this material (keeps the same number of slots).
+    If the object has no slots, adds one. The material is copied and renamed to the object's
+    base name (object name without the "_Optimized" suffix).
+    """
+    if not obj or obj.type != 'MESH':
+        return
+
+    # Resolve base name from object (strip _Optimized suffix if present)
+    base_name = obj.name
+    if base_name.endswith("_Optimized"):
+        base_name = base_name[:-10]
+
+    # Resolve path to Delighter.blend next to this module
+    try:
+        pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        pkg_dir = os.path.dirname(__file__)
+    blend_path = os.path.join(pkg_dir, "Delighter.blend")
+    if not os.path.isfile(blend_path):
+        print("[Delighter] Missing Delighter.blend")
+        return
+
+    # Load baked texture paths (with bent-normal guard)
+    dlbc, normal_path, dlao, dlbn = _find_baked_textures_ex(bake_tex_dir)
+
+    # Append the material (re-use if already present)
+    src_name = "Delighter"
+    src_mat = bpy.data.materials.get(src_name)
+    if src_mat is None:
+        try:
+            with bpy.data.libraries.load(blend_path, link=False) as (data_from, data_to):
+                if src_name in (data_from.materials or []):
+                    data_to.materials = [src_name]
+            src_mat = bpy.data.materials.get(src_name)
+        except Exception as e:
+            print(f"[Delighter] Append failed: {e}")
+            return
+    if src_mat is None:
+        print("[Delighter] Could not get appended material")
+        return
+
+    # Make a unique copy per object, rename to base_name (or reuse if exists)
+    mat = bpy.data.materials.get(base_name)
+    if mat is None:
+        try:
+            mat = src_mat.copy()
+            mat.name = base_name
+            mat.use_fake_user = False
+        except Exception as e:
+            print(f"[Delighter] Copy/rename failed: {e}")
+            mat = src_mat
+
+    # Assign images into named nodes if they exist
+    try:
+        nt = mat.node_tree
+        nodes = nt.nodes if nt else None
+        def _set_img(node_name, img_path, cs_name):
+            if not nodes or not img_path or not os.path.isfile(img_path):
+                return
+            node = nodes.get(node_name)
+            if node and hasattr(node, "image"):
+                try:
+                    img = bpy.data.images.load(img_path, check_existing=True)
+                except Exception:
+                    img = None
+                if img:
+                    node.image = img
+                    try:
+                        node.image.colorspace_settings.name = cs_name
+                    except Exception:
+                        pass
+
+        _set_img("DLBC", dlbc, "sRGB")
+        _set_img("DLAO", dlao, "Non-Color")
+        _set_img("DLBN", dlbn, "Non-Color")
+
+        # Normals node: must use true *_Normal(s).* (NOT Bent_Normals)
+        if normal_path and os.path.isfile(normal_path):
+            node_normals = nodes.get("Normals") or nodes.get("Normal") or nodes.get("NormalTex")
+            if node_normals and hasattr(node_normals, "image"):
+                try:
+                    img = bpy.data.images.load(normal_path, check_existing=True)
+                except Exception:
+                    img = None
+                if img:
+                    node_normals.image = img
+                    try:
+                        node_normals.image.colorspace_settings.name = "Non-Color"
+                    except Exception:
+                        pass
+    except Exception as e:
+        print(f"[Delighter] Node setup error: {e}")
+
+    # Replace object material slots with this material (keep slot count)
+    try:
+        slots = obj.data.materials
+        if len(slots) == 0:
+            slots.append(mat)
+        else:
+            for i in range(len(slots)):
+                slots[i] = mat
+        obj.active_material = mat
+    except Exception as e:
+        print(f"[Delighter] Assign error: {e}")
 
 # ------------------------------------------------------------
 # Registration (no panel here — your main panel draws the UI)

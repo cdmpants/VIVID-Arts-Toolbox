@@ -90,17 +90,42 @@ class VIVID_OT_bake_delit(Operator):
             delit_node.name = "Delit"
             delit_node.label = "Delit"
             delit_node.location = (-800, 300)
-
-        # New image
+        # New image (always keep name "<base>_Delit", update existing to new resolution)
         res = int(s.bake_resolution)
         img_name = f"{base_name}_Delit"
-        img = bpy.data.images.get(img_name) or bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
+        img = bpy.data.images.get(img_name)
+        if img is None:
+            img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
+        else:
+            # If size changed, try scaling; if that fails, recreate but keep the same name
+            try:
+                if getattr(img, "size", None) and (img.size[0] != res or img.size[1] != res):
+                    img.scale(res, res)
+            except Exception:
+                try:
+                    bpy.data.images.remove(img)
+                except Exception:
+                    pass
+                img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
+
+        # Prefer generated source for stable re-bakes regardless of file deletion on disk
+        try:
+            img.source = 'GENERATED'
+        except Exception:
+            pass
+        img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
+        
+        # Prefer generated source for stable re-bakes regardless of file deletion on disk
+        try:
+            img.source = 'GENERATED'
+        except Exception:
+            pass
+        
         delit_node.image = img
         try:
             delit_node.image.colorspace_settings.name = "sRGB"
         except Exception:
             pass
-
         # Filename based on DLBC
         _, _, bake_tex = _folders()
         dlbc, _, _, _ = _find_baked_textures_ex(bake_tex)
@@ -110,7 +135,7 @@ class VIVID_OT_bake_delit(Operator):
                 outfile = os.path.join(bake_tex, f"{base_name}_Delit.png")
         else:
             outfile = os.path.join(bake_tex, f"{base_name}_Delit.png")
-
+        
         # Force visible/selectable, select object
         prev_hide = obj.hide_viewport
         prev_select = obj.select_get()
@@ -122,13 +147,13 @@ class VIVID_OT_bake_delit(Operator):
         obj.select_set(True)
         context.view_layer.objects.active = obj
         nt.nodes.active = delit_node
-
+        
         # Bake diffuse color only
         try:
             scene.cycles.bake_type = 'DIFFUSE'
         except Exception:
             pass
-
+        
         try:
             bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, target='IMAGE_TEXTURES', use_clear=True)
         except Exception as e:
@@ -142,7 +167,7 @@ class VIVID_OT_bake_delit(Operator):
             if prev_layer_denoise is not None: context.view_layer.cycles.use_denoising = prev_layer_denoise
             self.report({'ERROR'}, f"Bake failed: {e}")
             return {'CANCELLED'}
-
+        
         # Save image
         os.makedirs(os.path.dirname(outfile), exist_ok=True)
         img.filepath_raw = outfile
@@ -151,7 +176,7 @@ class VIVID_OT_bake_delit(Operator):
             img.save()
         except Exception as e:
             self.report({'ERROR'}, f"Failed to save Delit image: {e}")
-
+        
         # restore visibility and denoise
         try:
             obj.select_set(prev_select)
@@ -160,11 +185,10 @@ class VIVID_OT_bake_delit(Operator):
             pass
         if prev_scene_denoise is not None: scene.cycles.use_denoising = prev_scene_denoise
         if prev_layer_denoise is not None: context.view_layer.cycles.use_denoising = prev_layer_denoise
-
+        
         self.report({'INFO'}, f"Delit baked → {outfile}")
         return {'FINISHED'}
-
-
+        
 class VIVID_PT_light_removal(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
