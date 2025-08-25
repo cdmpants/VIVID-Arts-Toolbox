@@ -93,3 +93,9 @@ def unregister():
         bpy.utils.unregister_class(cls)
 
     print("VIVID Arts Toolbox Unregistered!")
+
+# Ensure Export to Painter module is loaded
+try:
+    from . import vivid_painter_export as _vpe
+except Exception as _e:
+    print('[VIVID] vivid_painter_export not loaded:', _e)
