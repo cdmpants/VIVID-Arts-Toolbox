@@ -212,7 +212,167 @@ def _try_export_bake_meshes_only():
                     return True
         except Exception:
             pass
-    return False
+    # Fallback: export Optimized and Cage locally into BakeMesh
+    try:
+        root, bake_mesh, bake_tex = _folders()
+        return _export_bake_meshes_local(bake_mesh)
+    except Exception:
+        return False
+
+
+def _export_bake_meshes_local(bake_mesh_dir):
+    """
+    Export *_Optimized and *_Cage mesh objects to BakeMesh as FBX.
+    - Create BakeMesh if missing
+    - Temporarily unhide the objects and their collections to allow export
+    - Use FBX options: FBX All + Apply Transform (bake_space_transform + apply_unit_scale + FBX_SCALE_ALL)
+    - Restore prior visibility state after export
+    """
+    # Find targets
+    opt = None; cage = None
+    for o in bpy.data.objects:
+        if o.type != 'MESH':
+            continue
+        if o.name.endswith('_Optimized') and not opt:
+            opt = o
+        elif o.name.endswith('_Cage') and not cage:
+            cage = o
+        if opt and cage:
+            break
+
+    if not opt:
+        return False
+
+    # Ensure BakeMesh exists
+    os.makedirs(bake_mesh_dir, exist_ok=True)
+
+    base = opt.name[:-10] if opt.name.endswith('_Optimized') else opt.name
+    items = [(opt, os.path.join(bake_mesh_dir, f"{base}_Optimized.fbx"))]
+    if cage:
+        items.append((cage, os.path.join(bake_mesh_dir, f"{base}_Cage.fbx")))
+
+    # Helper: find the LayerCollection that maps to a given collection
+    root_lc = bpy.context.view_layer.layer_collection
+    def _find_layer_collection(lc, coll):
+        if lc.collection == coll:
+            return lc
+        for child in getattr(lc, 'children', []):
+            found = _find_layer_collection(child, coll)
+            if found:
+                return found
+        return None
+
+    prev_active = bpy.context.view_layer.objects.active
+    obj_prev = {}
+    lc_prev = {}
+    try:
+        for obj, out_path in items:
+            # Record previous object visibility
+            # Record previous visibility flags (including hide_get if available)
+            prev = {
+                'hide_viewport': getattr(obj, 'hide_viewport', None),
+                'hide_render': getattr(obj, 'hide_render', None),
+            }
+            try:
+                if hasattr(obj, 'hide_get'):
+                    prev['hide'] = obj.hide_get()
+            except Exception:
+                prev['hide'] = None
+            obj_prev[obj.name] = prev
+
+            # Record and unhide layer collections
+            for coll in getattr(obj, 'users_collection', []) or []:
+                lc = _find_layer_collection(root_lc, coll)
+                if lc and lc not in lc_prev:
+                    lc_prev[lc] = getattr(lc, 'hide_viewport', None)
+                    try:
+                        cur = lc
+                        while cur:
+                            cur.hide_viewport = False
+                            cur = getattr(cur, 'parent', None)
+                    except Exception:
+                        pass
+
+            # Unhide object for export
+            try:
+                if hasattr(obj, 'hide_set'):
+                    obj.hide_set(False)
+            except Exception:
+                pass
+            try:
+                if hasattr(obj, 'hide_viewport'):
+                    obj.hide_viewport = False
+            except Exception:
+                pass
+            try:
+                if hasattr(obj, 'hide_render'):
+                    obj.hide_render = False
+            except Exception:
+                pass
+
+            # Export only this object
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            kwargs = dict(
+                filepath=out_path,
+                use_selection=True,
+                object_types={'MESH'},
+                use_mesh_modifiers=True,
+                mesh_smooth_type='FACE',
+                axis_forward='-Z',
+                axis_up='Y',
+                bake_space_transform=True,
+            )
+            # Apply scale options akin to FBX All + Apply Transform
+            try:
+                kwargs['apply_unit_scale'] = True
+                kwargs['apply_scale_options'] = 'FBX_SCALE_ALL'
+            except Exception:
+                pass
+            bpy.ops.export_scene.fbx(**kwargs)
+
+    finally:
+        # Restore selection
+        try:
+            bpy.ops.object.select_all(action='DESELECT')
+            if prev_active:
+                prev_active.select_set(True)
+                bpy.context.view_layer.objects.active = prev_active
+        except Exception:
+            pass
+
+        # Restore collections
+        for lc, prev in lc_prev.items():
+            try:
+                if prev is not None:
+                    lc.hide_viewport = prev
+            except Exception:
+                pass
+
+        # Restore object visibility
+        for name, prev in obj_prev.items():
+            o = bpy.data.objects.get(name)
+            if not o:
+                continue
+            try:
+                if prev.get('hide_viewport') is not None:
+                    o.hide_viewport = prev['hide_viewport']
+            except Exception:
+                pass
+            try:
+                if prev.get('hide_render') is not None:
+                    o.hide_render = prev['hide_render']
+            except Exception:
+                pass
+            try:
+                # Restore generic hide (object mode visibility) last
+                if 'hide' in prev and prev['hide'] is not None and hasattr(o, 'hide_set'):
+                    o.hide_set(prev['hide'])
+            except Exception:
+                pass
+
+    return True
 
 # ------------------------------------------------------------
 # Material Setup
@@ -234,6 +394,74 @@ def _find_baked_textures(bake_tex_dir):
     img_norm = _glob_one(["*_Normal.*", "*_Normals.*"], bake_tex_dir)
     img_dlbc = _glob_one(["*DLBC*.*", "*BaseColor*.*"], bake_tex_dir)
     return img_dlbc, img_norm
+
+def _find_baked_textures_by_suffix(bake_tex_dir, base_name: str = None):
+    """Find baked textures by suffix only (basename flexible):
+    - DLBC    -> *_DLBC.*
+    - DLBN    -> *_DLBN.*
+    - DLAO    -> *_DLAO.*
+    - Normals -> *_Normal(s).* (excludes Bent_Normals)
+    Prefers files whose name contains the current base_name (case-insensitive),
+    but will fall back to any match. Returns newest per category.
+    """
+    if not os.path.isdir(bake_tex_dir):
+        return None, None, None, None
+
+    exts = (".png", ".tga", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp", ".webp")
+    base_tokens = []
+    if base_name:
+        b = base_name.lower()
+        base_tokens = [b, b.replace(" ", "_")]
+
+    # Track preferred (contains base) and fallback (any) candidates separately
+    picked = {
+        "dlbc": {"pref": (None, -1), "any": (None, -1)},
+        "dlao": {"pref": (None, -1), "any": (None, -1)},
+        "dlbn": {"pref": (None, -1), "any": (None, -1)},
+        "normal": {"pref": (None, -1), "any": (None, -1)},
+    }
+
+    for fn in os.listdir(bake_tex_dir):
+        full = os.path.join(bake_tex_dir, fn)
+        lower = fn.lower()
+        if not lower.endswith(exts) or not os.path.isfile(full):
+            continue
+        name_no_ext, _ = os.path.splitext(lower)
+
+        try:
+            ts = os.stat(full).st_mtime
+        except Exception:
+            ts = 0
+
+        contains_base = any(bt in name_no_ext for bt in base_tokens) if base_tokens else False
+
+        def choose(cat: str, path: str, ts_val: float, prefer: bool):
+            key = "pref" if prefer else "any"
+            cur_path, cur_ts = picked[cat][key]
+            if ts_val > cur_ts:
+                picked[cat][key] = (path, ts_val)
+
+        if name_no_ext.endswith("_dlbc"):
+            choose("dlbc", full, ts, contains_base)
+        elif name_no_ext.endswith("_dlao"):
+            choose("dlao", full, ts, contains_base)
+        elif name_no_ext.endswith("_dlbn"):
+            choose("dlbn", full, ts, contains_base)
+        elif name_no_ext.endswith("_normal") or name_no_ext.endswith("_normals"):
+            # For normal map only, exclude bent normals
+            if not ("bent" in name_no_ext and "normal" in name_no_ext):
+                choose("normal", full, ts, contains_base)
+
+    def resolve(cat: str):
+        pref_path, pref_ts = picked[cat]["pref"]
+        any_path, any_ts = picked[cat]["any"]
+        return pref_path if pref_path else any_path
+
+    dlbc = resolve("dlbc")
+    dlao = resolve("dlao")
+    dlbn = resolve("dlbn")
+    normal = resolve("normal")
+    return dlbc, normal, dlao, dlbn
 
 def _ensure_material(obj, base_name, dlbc_path, normal_path):
     mat_name = base_name
@@ -387,6 +615,37 @@ class VIVID_OT_bake_designer(Operator):
             self.report({'WARNING'}, f"Designer baking finished with warnings/errors in {duration:.1f}s. See log: {log_path}")
         else:
             self.report({'INFO'}, f"Designer baking complete in {duration:.1f}s → {bake_tex}")
+
+        # Attempt to switch active 3D View(s) to Material Preview and Diffuse Color pass
+        # (Safe no-op in background/headless mode or if properties unavailable.)
+        try:
+            wm = bpy.context.window_manager
+            if wm:
+                for window in wm.windows:
+                    scr = window.screen
+                    if not scr:
+                        continue
+                    for area in scr.areas:
+                        if area.type == 'VIEW_3D':
+                            for space in area.spaces:
+                                if space.type == 'VIEW_3D':
+                                    shading = getattr(space, 'shading', None)
+                                    if shading:
+                                        # Set viewport shading mode
+                                        try:
+                                            shading.type = 'MATERIAL'
+                                        except Exception:
+                                            pass
+                                        # Set render pass if supported (usually affects Rendered / Material preview overlays)
+                                        if hasattr(shading, 'render_pass'):
+                                            try:
+                                                shading.render_pass = 'DIFFUSE_COLOR'
+                                            except Exception:
+                                                pass
+                            # We only need to modify the first VIEW_3D we encounter per window
+                            break
+        except Exception:
+            pass
         return {'FINISHED'}
 
 
@@ -427,8 +686,12 @@ def _append_delighter_material(obj, bake_tex_dir):
         print("[Delighter] Missing Delighter.blend")
         return
 
-    # Load baked texture paths (with bent-normal guard)
-    dlbc, normal_path, dlao, dlbn = _find_baked_textures_ex(bake_tex_dir)
+    # Load baked texture paths by suffix mapping, preferring current base_name
+    dlbc, normal_path, dlao, dlbn = _find_baked_textures_by_suffix(bake_tex_dir, base_name)
+    try:
+        print(f"[Delighter] Resolved textures → DLBC={os.path.basename(dlbc) if dlbc else None}, DLAO={os.path.basename(dlao) if dlao else None}, DLBN={os.path.basename(dlbn) if dlbn else None}, Normals={os.path.basename(normal_path) if normal_path else None}")
+    except Exception:
+        pass
 
     # Append the material (re-use if already present)
     src_name = "Delighter"
@@ -461,38 +724,123 @@ def _append_delighter_material(obj, bake_tex_dir):
     try:
         nt = mat.node_tree
         nodes = nt.nodes if nt else None
+        def _norm_path(p: str) -> str:
+            try:
+                # Normalize and convert to forward slashes for Blender
+                return bpy.path.abspath(os.path.normpath(p)).replace('\\', '/')
+            except Exception:
+                return p
+
+        def _find_existing_image_by_path(abs_path: str):
+            # Compare against existing images by absolute path
+            try:
+                target = os.path.normcase(bpy.path.abspath(abs_path))
+                for im in bpy.data.images:
+                    try:
+                        cur = os.path.normcase(bpy.path.abspath(im.filepath or im.filepath_raw))
+                    except Exception:
+                        cur = (im.filepath or im.filepath_raw or "")
+                    if cur and cur == target:
+                        return im
+            except Exception:
+                pass
+            return None
+
         def _set_img(node_name, img_path, cs_name):
-            if not nodes or not img_path or not os.path.isfile(img_path):
+            if not nodes:
                 return
             node = nodes.get(node_name)
-            if node and hasattr(node, "image"):
+            if not (node and hasattr(node, "image")):
+                return
+            # Always clear previous image to avoid stale defaults
+            node.image = None
+            if not img_path or not os.path.isfile(img_path):
+                return
+            img = None
+            try:
+                np = _norm_path(img_path)
+                # Reuse existing image datablock if already loaded
+                img = _find_existing_image_by_path(np)
+                if img is None:
+                    img = bpy.data.images.load(np, check_existing=True)
+                # If packed, ensure we reflect on-disk updates
                 try:
-                    img = bpy.data.images.load(img_path, check_existing=True)
+                    if getattr(img, 'packed_file', None):
+                        img.unpack(method='USE_ORIGINAL')
                 except Exception:
-                    img = None
-                if img:
-                    node.image = img
-                    try:
-                        node.image.colorspace_settings.name = cs_name
-                    except Exception:
-                        pass
+                    pass
+            except Exception:
+                img = None
+            if img:
+                # Ensure latest disk contents are loaded
+                try:
+                    img.reload()
+                except Exception:
+                    pass
+                node.image = img
+                try:
+                    node.image.colorspace_settings.name = cs_name
+                except Exception:
+                    pass
+            else:
+                try:
+                    print(f"[Delighter] FAILED to load image for node {node_name}: {img_path}")
+                except Exception:
+                    pass
 
+        # Suffix-to-node mapping
         _set_img("DLBC", dlbc, "sRGB")
         _set_img("DLAO", dlao, "Non-Color")
         _set_img("DLBN", dlbn, "Non-Color")
 
-        # Normals node: must use true *_Normal(s).* (NOT Bent_Normals)
+        # Normals node: must use *_Normals.* only (not Bent_Normals)
         if normal_path and os.path.isfile(normal_path):
-            node_normals = nodes.get("Normals") or nodes.get("Normal") or nodes.get("NormalTex")
+            # Prefer exact node name, then common alternates, then heuristic search
+            node_normals = (
+                nodes.get("Normals") or
+                nodes.get("Normal") or
+                nodes.get("NormalTex")
+            )
+            if not node_normals:
+                # Heuristic: first TexImage node whose name mentions 'normal' but not 'bent'
+                for cand in nodes:
+                    try:
+                        if cand.bl_idname == 'ShaderNodeTexImage':
+                            nm = (cand.name or "").lower()
+                            if ("normal" in nm) and ("bent" not in nm):
+                                node_normals = cand
+                                break
+                    except Exception:
+                        pass
             if node_normals and hasattr(node_normals, "image"):
+                # Force reassignment and reload so rebakes update live
+                node_normals.image = None
+                img = None
                 try:
-                    img = bpy.data.images.load(normal_path, check_existing=True)
+                    np = _norm_path(normal_path)
+                    img = _find_existing_image_by_path(np)
+                    if img is None:
+                        img = bpy.data.images.load(np, check_existing=True)
+                    try:
+                        if getattr(img, 'packed_file', None):
+                            img.unpack(method='USE_ORIGINAL')
+                    except Exception:
+                        pass
                 except Exception:
                     img = None
                 if img:
+                    try:
+                        img.reload()
+                    except Exception:
+                        pass
                     node_normals.image = img
                     try:
                         node_normals.image.colorspace_settings.name = "Non-Color"
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        print(f"[Delighter] FAILED to load Normals image: {normal_path}")
                     except Exception:
                         pass
     except Exception as e:

@@ -40,13 +40,13 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
 
     # NEW — Painter integration
     painter_exe_path: StringProperty(
-        name="Substance 3D Painter EXE",
+        name="Substance Painter (Adobe Substance 3D Painter.exe)",
         subtype='FILE_PATH',
         description="Path to Substance 3D Painter executable (e.g. Substance 3D Painter.exe)",
         default=""
     )
     texture_export_dir: StringProperty(
-        name="Texture Export Directory",
+        name="Texture Destination",
         subtype='DIR_PATH',
         description="Directory Painter should export textures to (General Export → Output Directory)",
         default=""
@@ -55,8 +55,13 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
     def draw(self, context):
         layout = self.layout
         layout.label(text="VIVID Arts Toolbox Settings")
+
+        # Primary export/config paths (ordered for workflow)
         layout.prop(self, "asset_destination_path")
+        layout.prop(self, "texture_export_dir")
         layout.prop(self, "substance_baker_path")
+        # Substance Painter path shown inline after Substance Baker
+        layout.prop(self, "painter_exe_path")
 
         layout.separator()
         layout.label(text="LOD Generation Options:", icon='INFO')
@@ -75,11 +80,4 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
             layout.label(text="PyMeshLab automation is disabled.", icon='CHECKBOX_DEHLT')
             layout.prop(self, "meshlab_executable_path")
             layout.label(text="If 'MeshLab Server Path' is empty, manual MeshLab steps are required.", icon='INFO')
-
-        # NEW — Painter prefs UI
-        layout.separator()
-        boxp = layout.box()
-        boxp.label(text="Export to Painter — Preferences", icon='SHADING_TEXTURE')
-        boxp.prop(self, "painter_exe_path")
-        boxp.prop(self, "texture_export_dir")
 
