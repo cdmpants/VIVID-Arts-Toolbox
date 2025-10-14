@@ -267,35 +267,7 @@ class OBJECT_OT_shadowproxy_list_pairs(bpy.types.Operator):
 # Panel (now under the same tab + parent as other foldouts)
 # =========================================================
 
-class VIEW3D_PT_shadowproxy_correction(bpy.types.Panel):
-    bl_space_type='VIEW_3D'
-    bl_region_type='UI'
-    bl_category  = "VIVID Arts Toolbox"   # SAME TAB as others
-    bl_parent_id = "VIVID_PT_main_panel"  # CHILD FOLDOUT under main toolbox panel
-    bl_label     = "ShadowProxy Correction"
-
-    bl_order     = 40                      # Above Export Asset (which is 50)
-
-    def draw(self,context):
-        s=context.scene; layout=self.layout
-        box=layout.box(); box.label(text="Solve Settings",icon='MOD_SHRINKWRAP')
-        box.prop(s,"sp_margin")
-        box.prop(s,"sp_grid")
-        box.prop(s,"sp_edge_samples")
-        row = box.row(align=True)
-        row.prop(s,"sp_passes")
-        row.prop(s,"sp_v_passes")
-        box.prop(s,"sp_max_push")
-        row=box.row(align=True); row.prop(s,"sp_token_lod"); row.prop(s,"sp_token_proxy")
-
-        layout.separator()
-        col=layout.column(align=True)
-        op=col.operator(OBJECT_OT_shadowproxy_fit_all_pairs.bl_idname,text="Fit Shadow Proxies",icon='MOD_SHRINKWRAP')
-        op.margin=s.sp_margin; op.grid=s.sp_grid; op.edge_samples=s.sp_edge_samples
-        op.passes=s.sp_passes; op.v_passes=s.sp_v_passes; op.max_push=s.sp_max_push
-        op.only_selected=s.sp_only_selected_pairs
-        col.prop(s,"sp_only_selected_pairs")
-        col.operator(OBJECT_OT_shadowproxy_list_pairs.bl_idname,text="List Pairs",icon='INFO')
+# Panel moved into vivid_arts_toolbox/panel.py
 
 # =========================================================
 # Scene props
@@ -317,7 +289,7 @@ def _ensure_scene_props():
 # Register
 # =========================================================
 
-_classes=(OBJECT_OT_shadowproxy_fit_all_pairs,OBJECT_OT_shadowproxy_list_pairs,VIEW3D_PT_shadowproxy_correction)
+_classes=(OBJECT_OT_shadowproxy_fit_all_pairs,OBJECT_OT_shadowproxy_list_pairs)
 
 def register():
     for c in _classes:

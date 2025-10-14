@@ -132,6 +132,60 @@ class VIVID_PT_export_to_painter(Panel):
         else:
             col.label(text="Operator vivid.export_to_painter not registered.", icon='ERROR')
 
+
+# --------- Panels moved from operators ---------
+
+class VIVID_PT_light_removal(Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category   = "VIVID Arts Toolbox"
+    bl_parent_id  = "VIVID_PT_main_panel"
+    bl_label      = "Light Removal"
+    bl_order      = 15
+
+    def draw(self, context):
+        layout = self.layout
+        s = getattr(context.scene, "vivid_light_removal", None)
+        box = layout.box()
+        box.label(text="Settings", icon='PREFERENCES')
+        if s:
+            row = box.row(align=True); row.prop(s, "bake_resolution", text="Bake Resolution")
+            row = box.row(align=True); row.prop(s, "engine",          text="Engine")
+        else:
+            box.label(text="Light Removal settings not found.", icon='INFO')
+        col = layout.column(align=True)
+        col.operator("vivid.bake_delit", text="Bake Delit Texture", icon='RENDER_STILL')
+
+
+class VIEW3D_PT_shadowproxy_correction(Panel):
+    bl_space_type='VIEW_3D'
+    bl_region_type='UI'
+    bl_category  = "VIVID Arts Toolbox"
+    bl_parent_id = "VIVID_PT_main_panel"
+    bl_label     = "ShadowProxy Correction"
+    bl_order     = 40
+
+    def draw(self,context):
+        s=context.scene; layout=self.layout
+        box=layout.box(); box.label(text="Solve Settings",icon='MOD_SHRINKWRAP')
+        box.prop(s,"sp_margin")
+        box.prop(s,"sp_grid")
+        box.prop(s,"sp_edge_samples")
+        row = box.row(align=True)
+        row.prop(s,"sp_passes")
+        row.prop(s,"sp_v_passes")
+        box.prop(s,"sp_max_push")
+        row=box.row(align=True); row.prop(s,"sp_token_lod"); row.prop(s,"sp_token_proxy")
+
+        layout.separator()
+        col=layout.column(align=True)
+        op=col.operator("object.shadowproxy_fit_all_pairs",text="Fit Shadow Proxies",icon='MOD_SHRINKWRAP')
+        op.margin=s.sp_margin; op.grid=s.sp_grid; op.edge_samples=s.sp_edge_samples
+        op.passes=s.sp_passes; op.v_passes=s.sp_v_passes; op.max_push=s.sp_max_push
+        op.only_selected=s.sp_only_selected_pairs
+        col.prop(s,"sp_only_selected_pairs")
+        col.operator("object.shadowproxy_list_pairs",text="List Pairs",icon='INFO')
+
 _classes = (
     VIVID_PT_main_panel,
     VIVID_PT_bake_textures,
@@ -139,6 +193,8 @@ _classes = (
     VIVID_PT_setup_lods,
     VIVID_PT_export_asset,
     VIVID_PT_export_to_painter,  # NEW: added last so it appears at the bottom
+    VIVID_PT_light_removal,
+    VIEW3D_PT_shadowproxy_correction,
 )
 
 def register():

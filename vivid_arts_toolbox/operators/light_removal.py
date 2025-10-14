@@ -189,29 +189,7 @@ class VIVID_OT_bake_delit(Operator):
         self.report({'INFO'}, f"Delit baked → {outfile}")
         return {'FINISHED'}
         
-class VIVID_PT_light_removal(Panel):
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category   = "VIVID Arts Toolbox"
-    bl_parent_id  = "VIVID_PT_main_panel"
-    bl_label      = "Light Removal"
-    bl_order      = 15
-
-    def draw(self, context):
-        layout = self.layout
-        s = getattr(context.scene, "vivid_light_removal", None)
-        box = layout.box()
-        box.label(text="Settings", icon='PREFERENCES')
-        if s:
-            row = box.row(align=True); row.prop(s, "bake_resolution", text="Bake Resolution")
-            row = box.row(align=True); row.prop(s, "engine",          text="Engine")
-        else:
-            box.label(text="Light Removal settings not found.", icon='INFO')
-        col = layout.column(align=True)
-        col.operator("vivid.bake_delit", text="Bake Delit Texture", icon='RENDER_STILL')
-
-
-CLASSES = (VIVID_LightRemovalSettings, VIVID_OT_bake_delit, VIVID_PT_light_removal)
+CLASSES = (VIVID_LightRemovalSettings, VIVID_OT_bake_delit)
 
 def register():
     for c in CLASSES:
@@ -222,4 +200,7 @@ def unregister():
     if hasattr(bpy.types.Scene, "vivid_light_removal"):
         del bpy.types.Scene.vivid_light_removal
     for c in reversed(CLASSES):
-        bpy.utils.unregister_class(c)
+        try:
+            bpy.utils.unregister_class(c)
+        except Exception:
+            pass
