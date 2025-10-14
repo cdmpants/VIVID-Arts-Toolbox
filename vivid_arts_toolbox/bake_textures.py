@@ -212,7 +212,155 @@ def _try_export_bake_meshes_only():
                     return True
         except Exception:
             pass
-    return False
+    # Fallback: export Optimized and Cage locally into BakeMesh
+    try:
+        root, bake_mesh, bake_tex = _folders()
+        return _export_bake_meshes_local(bake_mesh)
+    except Exception:
+        return False
+
+
+def _export_bake_meshes_local(bake_mesh_dir):
+    """
+    Export *_Optimized and *_Cage mesh objects to BakeMesh as FBX.
+    - Create BakeMesh if missing
+    - Temporarily unhide the objects and their collections to allow export
+    - Use FBX options: FBX All + Apply Transform (bake_space_transform + apply_unit_scale + FBX_SCALE_ALL)
+    - Restore prior visibility state after export
+    """
+    # Find targets
+    opt = None; cage = None
+    for o in bpy.data.objects:
+        if o.type != 'MESH':
+            continue
+        if o.name.endswith('_Optimized') and not opt:
+            opt = o
+        elif o.name.endswith('_Cage') and not cage:
+            cage = o
+        if opt and cage:
+            break
+
+    if not opt:
+        return False
+
+    # Ensure BakeMesh exists
+    os.makedirs(bake_mesh_dir, exist_ok=True)
+
+    base = opt.name[:-10] if opt.name.endswith('_Optimized') else opt.name
+    items = [(opt, os.path.join(bake_mesh_dir, f"{base}_Optimized.fbx"))]
+    if cage:
+        items.append((cage, os.path.join(bake_mesh_dir, f"{base}_Cage.fbx")))
+
+    # Helper: find the LayerCollection that maps to a given collection
+    root_lc = bpy.context.view_layer.layer_collection
+    def _find_layer_collection(lc, coll):
+        if lc.collection == coll:
+            return lc
+        for child in getattr(lc, 'children', []):
+            found = _find_layer_collection(child, coll)
+            if found:
+                return found
+        return None
+
+    prev_active = bpy.context.view_layer.objects.active
+    obj_prev = {}
+    lc_prev = {}
+    try:
+        for obj, out_path in items:
+            # Record previous object visibility
+            prev = {
+                'hide_viewport': getattr(obj, 'hide_viewport', None),
+                'hide_render': getattr(obj, 'hide_render', None),
+            }
+            obj_prev[obj.name] = prev
+
+            # Record and unhide layer collections
+            for coll in getattr(obj, 'users_collection', []) or []:
+                lc = _find_layer_collection(root_lc, coll)
+                if lc and lc not in lc_prev:
+                    lc_prev[lc] = getattr(lc, 'hide_viewport', None)
+                    try:
+                        cur = lc
+                        while cur:
+                            cur.hide_viewport = False
+                            cur = getattr(cur, 'parent', None)
+                    except Exception:
+                        pass
+
+            # Unhide object for export
+            try:
+                if hasattr(obj, 'hide_set'):
+                    obj.hide_set(False)
+            except Exception:
+                pass
+            try:
+                if hasattr(obj, 'hide_viewport'):
+                    obj.hide_viewport = False
+            except Exception:
+                pass
+            try:
+                if hasattr(obj, 'hide_render'):
+                    obj.hide_render = False
+            except Exception:
+                pass
+
+            # Export only this object
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            kwargs = dict(
+                filepath=out_path,
+                use_selection=True,
+                object_types={'MESH'},
+                use_mesh_modifiers=True,
+                mesh_smooth_type='FACE',
+                axis_forward='-Z',
+                axis_up='Y',
+                bake_space_transform=True,
+            )
+            # Apply scale options akin to FBX All + Apply Transform
+            try:
+                kwargs['apply_unit_scale'] = True
+                kwargs['apply_scale_options'] = 'FBX_SCALE_ALL'
+            except Exception:
+                pass
+            bpy.ops.export_scene.fbx(**kwargs)
+
+    finally:
+        # Restore selection
+        try:
+            bpy.ops.object.select_all(action='DESELECT')
+            if prev_active:
+                prev_active.select_set(True)
+                bpy.context.view_layer.objects.active = prev_active
+        except Exception:
+            pass
+
+        # Restore collections
+        for lc, prev in lc_prev.items():
+            try:
+                if prev is not None:
+                    lc.hide_viewport = prev
+            except Exception:
+                pass
+
+        # Restore object visibility
+        for name, prev in obj_prev.items():
+            o = bpy.data.objects.get(name)
+            if not o:
+                continue
+            try:
+                if prev.get('hide_viewport') is not None:
+                    o.hide_viewport = prev['hide_viewport']
+            except Exception:
+                pass
+            try:
+                if prev.get('hide_render') is not None:
+                    o.hide_render = prev['hide_render']
+            except Exception:
+                pass
+
+    return True
 
 # ------------------------------------------------------------
 # Material Setup
