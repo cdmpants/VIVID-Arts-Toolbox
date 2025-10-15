@@ -29,6 +29,7 @@ from .operators import shadowproxy_correction
 from .operators import light_removal   # existing
 # NEW: Export to Painter (self-registering like your other modules)
 from . import export_to_painter
+from .operators import generate_surface
 
 # Classes that need bpy.utils.register_class(...)
 _classes = (
@@ -47,6 +48,14 @@ def register():
 
     # Scene pointers & flags used across operators/panels
     bpy.types.Scene.vivid_lod_props = PointerProperty(type=properties.VIVID_PG_BakeProperties)
+    if not hasattr(bpy.types.Scene, "vivid_surface_margin"):
+        from bpy.props import FloatProperty
+        bpy.types.Scene.vivid_surface_margin = FloatProperty(
+            name="Surface Margin",
+            description="Default margin used by Generate Surface",
+            default=1.0,
+            min=0.0,
+        )
 
     # Warning dialog flags (used by Setup LODs flow)
     if not hasattr(bpy.types.Scene, "vivid_warning_confirmed"):
@@ -63,6 +72,7 @@ def register():
     # Modules with custom register()
     shadowproxy_correction.register()
     light_removal.register()
+    generate_surface.register()
 
     # NEW: Export to Painter props/op (adds scene.vivid_export_to_painter and operator)
     export_to_painter.register()
@@ -76,11 +86,14 @@ def unregister():
     # Unregister in reverse order
     light_removal.unregister()
     shadowproxy_correction.unregister()
+    generate_surface.unregister()
     panel.unregister()
 
     # Remove Scene pointers/flags
     if hasattr(bpy.types.Scene, "vivid_lod_props"):
         del bpy.types.Scene.vivid_lod_props
+    if hasattr(bpy.types.Scene, "vivid_surface_margin"):
+        del bpy.types.Scene.vivid_surface_margin
     if hasattr(bpy.types.Scene, "vivid_warning_confirmed"):
         del bpy.types.Scene.vivid_warning_confirmed
     if hasattr(bpy.types.Scene, "vivid_warning_callback_id"):

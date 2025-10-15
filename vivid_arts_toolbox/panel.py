@@ -16,6 +16,26 @@ class VIVID_PT_main_panel(Panel):
     def draw(self, context):
         pass
 
+
+class VIVID_PT_generate_surface(Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category   = "VIVID Arts Toolbox"
+    bl_parent_id  = "VIVID_PT_main_panel"
+    bl_label      = "Generate Surface"
+    bl_order      = 1
+    def draw(self, context):
+        layout = self.layout
+        box = layout.box()
+        row = box.row(align=True)
+        row.prop(context.scene, "vivid_surface_margin", text="Margin")
+        col = layout.column(align=True)
+        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "generate_surface"):
+            op = col.operator("vivid.generate_surface", text="Generate Surface", icon='MESH_GRID')
+            op.margin = getattr(context.scene, "vivid_surface_margin", 1.0)
+        else:
+            col.label(text="Operator vivid.generate_surface not registered.", icon='ERROR')
+
 class VIVID_PT_bake_textures(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -188,6 +208,7 @@ class VIEW3D_PT_shadowproxy_correction(Panel):
 
 _classes = (
     VIVID_PT_main_panel,
+    VIVID_PT_generate_surface,
     VIVID_PT_bake_textures,
     VIVID_PT_generate_asset,
     VIVID_PT_setup_lods,
@@ -200,7 +221,19 @@ _classes = (
 def register():
     for c in _classes:
         bpy.utils.register_class(c)
+    # Simple scene prop to store default margin value
+    if not hasattr(bpy.types.Scene, "vivid_surface_margin"):
+        from bpy.props import FloatProperty
+        bpy.types.Scene.vivid_surface_margin = FloatProperty(
+            name="Surface Margin",
+            description="Default margin used by Generate Surface",
+            default=1.0,
+            min=0.0,
+            soft_max=100.0,
+        )
 
 def unregister():
     for c in reversed(_classes):
         bpy.utils.unregister_class(c)
+    if hasattr(bpy.types.Scene, "vivid_surface_margin"):
+        del bpy.types.Scene.vivid_surface_margin
