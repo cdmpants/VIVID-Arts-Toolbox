@@ -185,6 +185,56 @@ def _load_and_patch_json(src_json, files_map, output_dir, dest_json, res_px):
         json.dump(data, f, indent=2)
     return dest_json
 
+def _apply_udim_to_json(json_path, udim_tiles):
+    """Patch an already-generated JSON to include UDIM tiles and flags.
+    - udim_tiles: list of (u, v) ints; if empty or [(0,0)] only, no-op.
+    """
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return json_path
+
+    def set_if_key_present(container, key, value):
+        if isinstance(container, dict) and key in container:
+            container[key] = value
+
+    # Determine if UDIM mode should be enabled
+    tiles = sorted({(int(u), int(v)) for (u, v) in (udim_tiles or []) if int(u) >= 0 and int(v) >= 0})
+    is_udim = False
+    if tiles:
+        # If any tile beyond (0,0), treat as UDIM; or more than one tile
+        is_udim = len(tiles) > 1 or tiles != [(0, 0)]
+
+    if is_udim:
+        # Top-level defaults match Designer's "Bakers default values -> UV tiles: All"
+        data["uv_tiles"] = [[u, v] for (u, v) in tiles]
+        # Mirror uv_tiles into common sections if keys exist (no is_udim flags)
+        for key in ("Common", "CommonProjection", "output"):
+            sec = data.get(key)
+            if isinstance(sec, dict):
+                set_if_key_present(sec, "uv_tiles", [[u, v] for (u, v) in tiles])
+        # Per-baker settings if the schema exposes these fields
+        for baker in data.get("bakers", []) or []:
+            if isinstance(baker, dict):
+                for subkey in ("parameters", "commonOutputParameters"):
+                    sub = baker.get(subkey)
+                    if isinstance(sub, dict):
+                        set_if_key_present(sub, "uv_tiles", [[u, v] for (u, v) in tiles])
+
+    # Write back
+    try:
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
+    return json_path
+
+    # Save generated JSON
+    with open(dest_json, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return dest_json
+
 # ------------------------------------------------------------
 # Running the baker
 # ------------------------------------------------------------
@@ -500,6 +550,32 @@ def _ensure_material(obj, base_name, dlbc_path, normal_path):
     else:
         obj.data.materials.append(mat)
 
+    return mat
+
+# ------------------------------------------------------------
+# UDIM helpers
+# ------------------------------------------------------------
+def _udim_tiles_from_object(obj) -> list:
+    """Return sorted unique (u, v) UDIM tile coordinates used by the object's active UV map.
+    Returns [] if no UVs found.
+    """
+    tiles = set()
+    try:
+        me = getattr(obj, 'data', None)
+        if not me or not getattr(me, 'uv_layers', None) or len(me.uv_layers) == 0:
+            return []
+        uv_layer = me.uv_layers.active or me.uv_layers[0]
+        for luv in uv_layer.data:
+            u = int(math.floor(luv.uv.x))
+            v = int(math.floor(luv.uv.y))
+            tiles.add((u, v))
+    except Exception:
+        return []
+    try:
+        return sorted(tiles)
+    except Exception:
+        return list(tiles)
+
 # ------------------------------------------------------------
 # Properties (match panel.py)
 # ------------------------------------------------------------
@@ -597,6 +673,15 @@ class VIVID_OT_bake_designer(Operator):
         log_path = os.path.join(bake_mesh, "bake_designer.log")
         gen_main = os.path.join(bake_mesh, "_generated_bake_preset.json")
         _load_and_patch_json(main_json, files, bake_tex, gen_main, res_px)
+
+        # UDIM detection from active *_Optimized object and JSON patching (uv_tiles, is_udim)
+        try:
+            opt_obj = _find_optimized_object()
+            udim_tiles = _udim_tiles_from_object(opt_obj) if opt_obj else []
+            if udim_tiles and (len(udim_tiles) > 1 or udim_tiles != [(0, 0)]):
+                _apply_udim_to_json(gen_main, udim_tiles)
+        except Exception:
+            pass
         rc_total = _run_baker(exe_path, gen_main, log_path, cwd=bake_mesh, use_cpu=use_cpu)
 
         # --- Stop timer ---
