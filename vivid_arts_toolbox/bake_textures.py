@@ -513,6 +513,84 @@ def _find_baked_textures_by_suffix(bake_tex_dir, base_name: str = None):
     normal = resolve("normal")
     return dlbc, normal, dlao, dlbn
 
+def _extract_udim_token(text: str):
+    """Extract a UDIM numeric token like _1001, _1002 from a string; returns '1001' etc or None.
+    Only accepts values >= 1001.
+    """
+    try:
+        import re
+        m = re.search(r"_(\d{4})(?:\D|$)", text or "")
+        if m:
+            val = int(m.group(1))
+            if val >= 1001:
+                return str(val)
+    except Exception:
+        pass
+    return None
+
+def _find_baked_textures_by_suffix_udim(bake_tex_dir, base_name: str = None):
+    """Discover baked textures grouped by UDIM token per category.
+    Returns a dict: { udim: { 'dlbc': path or None, 'normal':..., 'dlao':..., 'dlbn':... } }
+    Prefers files containing base_name but will fall back to any; picks newest per (udim, category).
+    If no UDIM token found in a file, it is grouped under '1001' to support non-UDIM flows with {udim}=1001.
+    """
+    out = {}
+    if not os.path.isdir(bake_tex_dir):
+        return out
+    exts = (".png", ".tga", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp", ".webp")
+    base_tokens = []
+    if base_name:
+        b = base_name.lower()
+        base_tokens = [b, b.replace(" ", "_")]
+
+    def ensure_key(u):
+        if u not in out:
+            out[u] = {
+                'dlbc': (None, -1, False),
+                'dlao': (None, -1, False),
+                'dlbn': (None, -1, False),
+                'normal': (None, -1, False),
+            }
+
+    def consider(u, cat, path, ts, prefer):
+        cur_p, cur_t, cur_pref = out[u][cat]
+        # Prefer base-matching files; if equal preference, pick newest
+        if prefer and not cur_pref:
+            out[u][cat] = (path, ts, True)
+        elif prefer == cur_pref and ts > cur_t:
+            out[u][cat] = (path, ts, cur_pref)
+        elif not cur_p:
+            out[u][cat] = (path, ts, cur_pref)
+
+    for fn in os.listdir(bake_tex_dir):
+        full = os.path.join(bake_tex_dir, fn)
+        lower = fn.lower()
+        if not lower.endswith(exts) or not os.path.isfile(full):
+            continue
+        name_no_ext, _ = os.path.splitext(lower)
+        udim = _extract_udim_token(name_no_ext) or '1001'
+        contains_base = any(bt in name_no_ext for bt in base_tokens) if base_tokens else False
+        try:
+            ts = os.stat(full).st_mtime
+        except Exception:
+            ts = 0
+        ensure_key(udim)
+        if name_no_ext.endswith("_dlbc"):
+            consider(udim, 'dlbc', full, ts, contains_base)
+        elif name_no_ext.endswith("_dlao"):
+            consider(udim, 'dlao', full, ts, contains_base)
+        elif name_no_ext.endswith("_dlbn"):
+            consider(udim, 'dlbn', full, ts, contains_base)
+        elif name_no_ext.endswith("_normal") or name_no_ext.endswith("_normals"):
+            if not ("bent" in name_no_ext and "normal" in name_no_ext):
+                consider(udim, 'normal', full, ts, contains_base)
+
+    # Strip timestamps/prefer flags
+    simplified = {}
+    for u, cats in out.items():
+        simplified[u] = {k: v[0] for k, v in cats.items()}
+    return simplified
+
 def _ensure_material(obj, base_name, dlbc_path, normal_path):
     mat_name = base_name
     mat = bpy.data.materials.get(mat_name)
@@ -593,23 +671,25 @@ _ENGINE_ITEMS = [
 ]
 
 class VIVID_DesignerBakeSettings(PropertyGroup):
-    export_bake_meshes: BoolProperty(
+    # Use explicit __annotations__ to keep Blender property registration
+    __annotations__ = {}
+    __annotations__['export_bake_meshes'] = BoolProperty(
         name="Export Bake Meshes",
         description="Export bake meshes before running the Designer baker",
         default=True
     )
-    setup_material: BoolProperty(
+    __annotations__['setup_material'] = BoolProperty(
         name="Setup Material",
         description="Create/assign a material on the _Optimized object using baked DLBC/Normal maps",
         default=True
     )
-    bake_resolution: EnumProperty(
+    __annotations__['bake_resolution'] = EnumProperty(
         name="Bake Resolution",
         description="Target output resolution for Designer bakers",
         items=_BAKE_RES_ITEMS,
         default="4096",
     )
-    engine: EnumProperty(
+    __annotations__['engine'] = EnumProperty(
         name="Engine",
         description="CPU (adds --cpu) or GPU (no flag) for Substance baker",
         items=_ENGINE_ITEMS,
@@ -771,12 +851,10 @@ def _append_delighter_material(obj, bake_tex_dir):
         print("[Delighter] Missing Delighter.blend")
         return
 
-    # Load baked texture paths by suffix mapping, preferring current base_name
-    dlbc, normal_path, dlao, dlbn = _find_baked_textures_by_suffix(bake_tex_dir, base_name)
-    try:
-        print(f"[Delighter] Resolved textures → DLBC={os.path.basename(dlbc) if dlbc else None}, DLAO={os.path.basename(dlao) if dlao else None}, DLBN={os.path.basename(dlbn) if dlbn else None}, Normals={os.path.basename(normal_path) if normal_path else None}")
-    except Exception:
-        pass
+    # Discover textures, supporting UDIM groupings
+    udim_map = _find_baked_textures_by_suffix_udim(bake_tex_dir, base_name)
+    # Also compute single fallback set (non-UDIM)
+    dlbc_single, normal_single, dlao_single, dlbn_single = _find_baked_textures_by_suffix(bake_tex_dir, base_name)
 
     # Append the material (re-use if already present)
     src_name = "Delighter"
@@ -794,115 +872,97 @@ def _append_delighter_material(obj, bake_tex_dir):
         print("[Delighter] Could not get appended material")
         return
 
-    # Make a unique copy per object, rename to base_name (or reuse if exists)
-    mat = bpy.data.materials.get(base_name)
-    if mat is None:
+    def _norm_path(p: str) -> str:
         try:
-            mat = src_mat.copy()
-            mat.name = base_name
-            mat.use_fake_user = False
+            return bpy.path.abspath(os.path.normpath(p)).replace('\\', '/')
+        except Exception:
+            return p
+
+    def _find_existing_image_by_path(abs_path: str):
+        try:
+            target = os.path.normcase(bpy.path.abspath(abs_path))
+            for im in bpy.data.images:
+                try:
+                    cur = os.path.normcase(bpy.path.abspath(im.filepath or im.filepath_raw))
+                except Exception:
+                    cur = (im.filepath or im.filepath_raw or "")
+                if cur and cur == target:
+                    return im
+        except Exception:
+            pass
+        return None
+
+    def _overwrite_material_with_template(dst_mat: bpy.types.Material, template_mat: bpy.types.Material):
+        try:
+            dst_mat.use_nodes = True
+            dst_nt = dst_mat.node_tree
+            src_nt = template_mat.node_tree
+            if not (dst_nt and src_nt):
+                return
+            # Clear dst nodes
+            for n in list(dst_nt.nodes):
+                dst_nt.nodes.remove(n)
+            # Copy nodes
+            node_map = {}
+            for n in src_nt.nodes:
+                nn = dst_nt.nodes.new(type=n.bl_idname)
+                try:
+                    nn.name = n.name
+                except Exception:
+                    pass
+                nn.label = getattr(n, 'label', nn.label)
+                nn.location = getattr(n, 'location', (0, 0))
+                nn.width = getattr(n, 'width', nn.width)
+                nn.height = getattr(n, 'height', nn.height)
+                nn.hide = getattr(n, 'hide', False)
+                # Preserve node tree for Group nodes
+                try:
+                    if hasattr(nn, 'node_tree') and hasattr(n, 'node_tree'):
+                        nn.node_tree = n.node_tree
+                except Exception:
+                    pass
+                node_map[n] = nn
+            # Copy links
+            def _socket_index(list_sockets, sock):
+                try:
+                    return list_sockets[:].index(sock)
+                except ValueError:
+                    try:
+                        names = [s.name for s in list_sockets]
+                        return names.index(getattr(sock, 'name', ''))
+                    except Exception:
+                        return -1
+            for lk in src_nt.links:
+                from_n = node_map.get(lk.from_node)
+                to_n = node_map.get(lk.to_node)
+                if not (from_n and to_n):
+                    continue
+                try:
+                    fi = _socket_index(lk.from_node.outputs, lk.from_socket)
+                    ti = _socket_index(lk.to_node.inputs, lk.to_socket)
+                    if fi >= 0 and ti >= 0:
+                        dst_nt.links.new(from_n.outputs[fi], to_n.inputs[ti])
+                except Exception:
+                    pass
         except Exception as e:
-            print(f"[Delighter] Copy/rename failed: {e}")
-            mat = src_mat
+            print(f"[Delighter] Overwrite material template error: {e}")
 
-    # Assign images into named nodes if they exist
-    try:
-        nt = mat.node_tree
-        nodes = nt.nodes if nt else None
-        def _norm_path(p: str) -> str:
-            try:
-                # Normalize and convert to forward slashes for Blender
-                return bpy.path.abspath(os.path.normpath(p)).replace('\\', '/')
-            except Exception:
-                return p
-
-        def _find_existing_image_by_path(abs_path: str):
-            # Compare against existing images by absolute path
-            try:
-                target = os.path.normcase(bpy.path.abspath(abs_path))
-                for im in bpy.data.images:
-                    try:
-                        cur = os.path.normcase(bpy.path.abspath(im.filepath or im.filepath_raw))
-                    except Exception:
-                        cur = (im.filepath or im.filepath_raw or "")
-                    if cur and cur == target:
-                        return im
-            except Exception:
-                pass
-            return None
-
-        def _set_img(node_name, img_path, cs_name):
-            if not nodes:
-                return
-            node = nodes.get(node_name)
-            if not (node and hasattr(node, "image")):
-                return
-            # Always clear previous image to avoid stale defaults
-            node.image = None
-            if not img_path or not os.path.isfile(img_path):
-                return
-            img = None
-            try:
-                np = _norm_path(img_path)
-                # Reuse existing image datablock if already loaded
-                img = _find_existing_image_by_path(np)
-                if img is None:
-                    img = bpy.data.images.load(np, check_existing=True)
-                # If packed, ensure we reflect on-disk updates
-                try:
-                    if getattr(img, 'packed_file', None):
-                        img.unpack(method='USE_ORIGINAL')
-                except Exception:
-                    pass
-            except Exception:
-                img = None
-            if img:
-                # Ensure latest disk contents are loaded
-                try:
-                    img.reload()
-                except Exception:
-                    pass
-                node.image = img
-                try:
-                    node.image.colorspace_settings.name = cs_name
-                except Exception:
-                    pass
-            else:
-                try:
-                    print(f"[Delighter] FAILED to load image for node {node_name}: {img_path}")
-                except Exception:
-                    pass
-
-        # Suffix-to-node mapping
-        _set_img("DLBC", dlbc, "sRGB")
-        _set_img("DLAO", dlao, "Non-Color")
-        _set_img("DLBN", dlbn, "Non-Color")
-
-        # Normals node: must use *_Normals.* only (not Bent_Normals)
-        if normal_path and os.path.isfile(normal_path):
-            # Prefer exact node name, then common alternates, then heuristic search
-            node_normals = (
-                nodes.get("Normals") or
-                nodes.get("Normal") or
-                nodes.get("NormalTex")
-            )
-            if not node_normals:
-                # Heuristic: first TexImage node whose name mentions 'normal' but not 'bent'
-                for cand in nodes:
-                    try:
-                        if cand.bl_idname == 'ShaderNodeTexImage':
-                            nm = (cand.name or "").lower()
-                            if ("normal" in nm) and ("bent" not in nm):
-                                node_normals = cand
-                                break
-                    except Exception:
-                        pass
-            if node_normals and hasattr(node_normals, "image"):
-                # Force reassignment and reload so rebakes update live
-                node_normals.image = None
+    def _set_images_on_material(dst_mat: bpy.types.Material, dlbc, normal_path, dlao, dlbn):
+        try:
+            nt = dst_mat.node_tree
+            nodes = nt.nodes if nt else None
+            def _set_img(node_name, img_path, cs_name):
+                if not nodes:
+                    return
+                node = nodes.get(node_name)
+                if not (node and hasattr(node, "image")):
+                    return
+                node.image = None
+                if not img_path or not os.path.isfile(img_path):
+                    return
                 img = None
                 try:
-                    np = _norm_path(normal_path)
+                    np = _norm_path(img_path)
                     img = _find_existing_image_by_path(np)
                     if img is None:
                         img = bpy.data.images.load(np, check_existing=True)
@@ -918,28 +978,107 @@ def _append_delighter_material(obj, bake_tex_dir):
                         img.reload()
                     except Exception:
                         pass
-                    node_normals.image = img
+                    node.image = img
                     try:
-                        node_normals.image.colorspace_settings.name = "Non-Color"
+                        node.image.colorspace_settings.name = cs_name
                     except Exception:
                         pass
-                else:
+            _set_img("DLBC", dlbc, "sRGB")
+            _set_img("DLAO", dlao, "Non-Color")
+            _set_img("DLBN", dlbn, "Non-Color")
+            if normal_path and os.path.isfile(normal_path):
+                node_normals = (
+                    nodes.get("Normals") or
+                    nodes.get("Normal") or
+                    nodes.get("NormalTex")
+                )
+                if not node_normals:
+                    for cand in nodes:
+                        try:
+                            if cand.bl_idname == 'ShaderNodeTexImage':
+                                nm = (cand.name or "").lower()
+                                if ("normal" in nm) and ("bent" not in nm):
+                                    node_normals = cand
+                                    break
+                        except Exception:
+                            pass
+                if node_normals and hasattr(node_normals, "image"):
+                    node_normals.image = None
+                    img = None
                     try:
-                        print(f"[Delighter] FAILED to load Normals image: {normal_path}")
+                        np = _norm_path(normal_path)
+                        img = _find_existing_image_by_path(np)
+                        if img is None:
+                            img = bpy.data.images.load(np, check_existing=True)
+                        try:
+                            if getattr(img, 'packed_file', None):
+                                img.unpack(method='USE_ORIGINAL')
+                        except Exception:
+                            pass
                     except Exception:
-                        pass
-    except Exception as e:
-        print(f"[Delighter] Node setup error: {e}")
+                        img = None
+                    if img:
+                        try:
+                            img.reload()
+                        except Exception:
+                            pass
+                        node_normals.image = img
+                        try:
+                            node_normals.image.colorspace_settings.name = "Non-Color"
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"[Delighter] Node setup error: {e}")
 
-    # Replace object material slots with this material (keep slot count)
+    # Decide if UDIM-style multi-material assignment is needed
+    slots = obj.data.materials
+    has_udim_mats = False
     try:
-        slots = obj.data.materials
-        if len(slots) == 0:
-            slots.append(mat)
-        else:
+        for m in slots:
+            if m and _extract_udim_token(m.name):
+                has_udim_mats = True
+                break
+    except Exception:
+        has_udim_mats = False
+
+    try:
+        if has_udim_mats or (len(udim_map.keys()) > 1):
+            # Per-slot assignment based on material UDIM; overwrite slot materials in place
             for i in range(len(slots)):
-                slots[i] = mat
-        obj.active_material = mat
+                m_old = slots[i]
+                target_name = m_old.name if m_old and m_old.name else f"{base_name}_1001"
+                udim = _extract_udim_token(target_name) or '1001'
+                tex = udim_map.get(udim) or udim_map.get('1001') or {
+                    'dlbc': dlbc_single,
+                    'normal': normal_single,
+                    'dlao': dlao_single,
+                    'dlbn': dlbn_single,
+                }
+                if m_old is None:
+                    m_old = bpy.data.materials.new(target_name)
+                    slots[i] = m_old
+                _overwrite_material_with_template(m_old, src_mat)
+                _set_images_on_material(m_old, tex.get('dlbc'), tex.get('normal'), tex.get('dlao'), tex.get('dlbn'))
+            obj.active_material = slots[0] if len(slots) > 0 else None
+        else:
+            # Single material applied to all slots; overwrite each slot's material contents
+            tex = udim_map.get('1001') or {
+                'dlbc': dlbc_single,
+                'normal': normal_single,
+                'dlao': dlao_single,
+                'dlbn': dlbn_single,
+            }
+            if len(slots) == 0:
+                m = bpy.data.materials.new(base_name)
+                slots.append(m)
+            for i in range(len(slots)):
+                m = slots[i]
+                if m is None:
+                    m = bpy.data.materials.new(base_name)
+                    slots[i] = m
+                _overwrite_material_with_template(m, src_mat)
+                _set_images_on_material(m, tex.get('dlbc'), tex.get('normal'), tex.get('dlao'), tex.get('dlbn'))
+            obj.active_material = slots[0]
     except Exception as e:
         print(f"[Delighter] Assign error: {e}")
 
