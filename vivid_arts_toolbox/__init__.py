@@ -15,7 +15,9 @@ from bpy.props import PointerProperty, BoolProperty, StringProperty
 # Core modules
 from . import preferences
 from . import properties
-from . import panel
+from . import panel_asset
+from . import panel_lods
+from . import panel_metadata
 from . import bake_textures
 
 # Operators (modules define operator classes; they don't register themselves)
@@ -30,6 +32,8 @@ from .operators import light_removal   # existing
 # NEW: Export to Painter (self-registering like your other modules)
 from . import export_to_painter
 from .operators import generate_surface
+from .operators import unwrap_uvs
+from . import metadata
 
 # Classes that need bpy.utils.register_class(...)
 _classes = (
@@ -67,12 +71,17 @@ def register():
     bake_textures.register_designer_bake()
 
     # Panels (UI foldouts)
-    panel.register()
+    panel_asset.register()
+    panel_lods.register()
+    panel_metadata.register()
 
     # Modules with custom register()
     shadowproxy_correction.register()
     light_removal.register()
     generate_surface.register()
+    unwrap_uvs.register()
+    metadata.register()
+    
 
     # NEW: Export to Painter props/op (adds scene.vivid_export_to_painter and operator)
     export_to_painter.register()
@@ -87,7 +96,12 @@ def unregister():
     light_removal.unregister()
     shadowproxy_correction.unregister()
     generate_surface.unregister()
-    panel.unregister()
+    unwrap_uvs.unregister()
+    metadata.unregister()
+    
+    panel_metadata.unregister()
+    panel_lods.unregister()
+    panel_asset.unregister()
 
     # Remove Scene pointers/flags
     if hasattr(bpy.types.Scene, "vivid_lod_props"):

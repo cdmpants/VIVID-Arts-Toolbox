@@ -440,17 +440,17 @@ def _remove_suffix(name: str, suffix: str):
     return name[:-len(suffix)] if name.endswith(suffix) else name
 
 def _find_baked_textures(bake_tex_dir):
-    # BaseColor transfer (DLBC) and Normal maps from BakeTextures
-    img_norm = _glob_one(["*_Normal.*", "*_Normals.*"], bake_tex_dir)
-    img_dlbc = _glob_one(["*DLBC*.*", "*BaseColor*.*"], bake_tex_dir)
+    # BaseColor transfer (BaseColorTransfer) and Normal maps from BakeTextures
+    img_norm = _glob_one(["*_Normal.*", "*_Normals.*", "*NormalOS*.*"], bake_tex_dir)
+    img_dlbc = _glob_one(["*BaseColorTransfer*.*", "*DLBC*.*", "*BaseColor*.*"], bake_tex_dir)
     return img_dlbc, img_norm
 
 def _find_baked_textures_by_suffix(bake_tex_dir, base_name: str = None):
     """Find baked textures by suffix only (basename flexible):
-    - DLBC    -> *_DLBC.*
-    - DLBN    -> *_DLBN.*
-    - DLAO    -> *_DLAO.*
-    - Normals -> *_Normal(s).* (excludes Bent_Normals)
+    - BaseColorTransfer (DLBC) -> *_BaseColorTransfer.* or *_DLBC.*
+    - BentNormalOS (DLBN OS)   -> *_BentNormalOS.* or *_DLBN.*
+    - AOWide (DLAO)            -> *_AOWide.* or *_DLAO.*
+    - Normals                  -> *_Normal(s).* or *_NormalOS.* (excludes Bent_Normals)
     Prefers files whose name contains the current base_name (case-insensitive),
     but will fall back to any match. Returns newest per category.
     """
@@ -491,13 +491,13 @@ def _find_baked_textures_by_suffix(bake_tex_dir, base_name: str = None):
             if ts_val > cur_ts:
                 picked[cat][key] = (path, ts_val)
 
-        if name_no_ext.endswith("_dlbc"):
+        if name_no_ext.endswith("_basecolortransfer") or name_no_ext.endswith("_dlbc") or ("basecolortransfer" in name_no_ext):
             choose("dlbc", full, ts, contains_base)
-        elif name_no_ext.endswith("_dlao"):
+        elif name_no_ext.endswith("_aowide") or name_no_ext.endswith("_dlao") or ("aowide" in name_no_ext):
             choose("dlao", full, ts, contains_base)
-        elif name_no_ext.endswith("_dlbn"):
+        elif name_no_ext.endswith("_bentnormalos") or name_no_ext.endswith("_dlbn") or ("bent" in name_no_ext and "normalos" in name_no_ext):
             choose("dlbn", full, ts, contains_base)
-        elif name_no_ext.endswith("_normal") or name_no_ext.endswith("_normals"):
+        elif name_no_ext.endswith("_normal") or name_no_ext.endswith("_normals") or name_no_ext.endswith("_normalos"):
             # For normal map only, exclude bent normals
             if not ("bent" in name_no_ext and "normal" in name_no_ext):
                 choose("normal", full, ts, contains_base)
@@ -575,13 +575,13 @@ def _find_baked_textures_by_suffix_udim(bake_tex_dir, base_name: str = None):
         except Exception:
             ts = 0
         ensure_key(udim)
-        if name_no_ext.endswith("_dlbc"):
+        if name_no_ext.endswith("_basecolortransfer") or name_no_ext.endswith("_dlbc") or ("basecolortransfer" in name_no_ext):
             consider(udim, 'dlbc', full, ts, contains_base)
-        elif name_no_ext.endswith("_dlao"):
+        elif name_no_ext.endswith("_aowide") or name_no_ext.endswith("_dlao") or ("aowide" in name_no_ext):
             consider(udim, 'dlao', full, ts, contains_base)
-        elif name_no_ext.endswith("_dlbn"):
+        elif name_no_ext.endswith("_bentnormalos") or name_no_ext.endswith("_dlbn") or ("bent" in name_no_ext and "normalos" in name_no_ext):
             consider(udim, 'dlbn', full, ts, contains_base)
-        elif name_no_ext.endswith("_normal") or name_no_ext.endswith("_normals"):
+        elif name_no_ext.endswith("_normal") or name_no_ext.endswith("_normals") or name_no_ext.endswith("_normalos"):
             if not ("bent" in name_no_ext and "normal" in name_no_ext):
                 consider(udim, 'normal', full, ts, contains_base)
 
@@ -825,10 +825,10 @@ def _append_delighter_material(obj, bake_tex_dir):
     """
     Appends 'Delighter' material from Delighter.blend (bundled with addon)
     and assigns baked textures:
-      - Node 'DLBC'      -> *_DLBC.*     (sRGB)
-      - Node 'DLAO'      -> *_DLAO.*     (Non-Color)
-      - Node 'DLBN'      -> *_DLBN.*     (Non-Color)
-      - Node 'Normals'   -> *_Normal(s).* (Non-Color, excludes Bent_Normals)
+    - Node 'BaseColorTransfer' -> *_BaseColorTransfer.* (sRGB) [fallback: *_DLBC.*]
+    - Node 'AOWide'           -> *_AOWide.* (Non-Color) [fallback: *_DLAO.*]
+    - Node 'BentNormalOS'     -> *_BentNormalOS.* (Non-Color) [fallback: *_DLBN.*]
+    - Node 'NormalOS'         -> *_NormalOS.* (Non-Color) [fallback: *_Normal(s).*]
     Replaces existing material slots with this material (keeps the same number of slots).
     If the object has no slots, adds one. The material is copied and renamed to the object's
     base name (object name without the "_Optimized" suffix).
@@ -983,11 +983,13 @@ def _append_delighter_material(obj, bake_tex_dir):
                         node.image.colorspace_settings.name = cs_name
                     except Exception:
                         pass
-            _set_img("DLBC", dlbc, "sRGB")
-            _set_img("DLAO", dlao, "Non-Color")
-            _set_img("DLBN", dlbn, "Non-Color")
+            # New node names with legacy fallbacks
+            _set_img("BaseColorTransfer", dlbc, "sRGB")
+            _set_img("AOWide", dlao, "Non-Color")
+            _set_img("BentNormalOS", dlbn, "Non-Color")
             if normal_path and os.path.isfile(normal_path):
                 node_normals = (
+                    nodes.get("NormalOS") or
                     nodes.get("Normals") or
                     nodes.get("Normal") or
                     nodes.get("NormalTex")

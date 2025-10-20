@@ -1,18 +1,5 @@
 import bpy
-from mathutils import Vector
 from bpy.props import FloatProperty
-
-
-def _bbox_xy_size_world(obj):
-    """Return (width_x, width_y) of object's world-space bounding box."""
-    mw = obj.matrix_world
-    xs = []
-    ys = []
-    for co in obj.bound_box:  # local coords
-        w = mw @ Vector(co)
-        xs.append(w.x)
-        ys.append(w.y)
-    return (max(xs) - min(xs), max(ys) - min(ys))
 
 
 def _replace_final_suffix(name: str, new_suffix: str) -> str:
@@ -28,7 +15,7 @@ def _replace_final_suffix(name: str, new_suffix: str) -> str:
 class VIVID_OT_generate_surface(bpy.types.Operator):
     bl_idname = "vivid.generate_surface"
     bl_label = "Generate Surface"
-    bl_description = "Create a plane at the 3D cursor sized to fit inside the active object's bounding box, then add Subdivision + Shrinkwrap modifiers to conform it."
+    bl_description = "Create a plane at the 3D cursor with explicit X/Y dimensions, then add Subdivision + Shrinkwrap modifiers to conform it."
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
@@ -36,16 +23,6 @@ class VIVID_OT_generate_surface(bpy.types.Operator):
         if not target or target.type != 'MESH':
             self.report({'ERROR'}, "Select a mesh object to generate the surface against.")
             return {'CANCELLED'}
-
-        # Resolve margin as a float robustly (in case property registration lags)
-        try:
-            margin_val = float(self.margin)
-        except Exception:
-            margin_val = float(getattr(context.scene, "vivid_surface_margin", 1.0))
-
-        # Compute a square size that fits inside target's XY bounding box with margin on each side
-        w_x, w_y = _bbox_xy_size_world(target)
-        side = max(min(w_x, w_y) - 2.0 * margin_val, 0.01)
 
         # Create plane at cursor
         cursor_loc = context.scene.cursor.location.copy()
@@ -57,9 +34,11 @@ class VIVID_OT_generate_surface(bpy.types.Operator):
         plane.name = new_name
         plane.data.name = new_name
 
-        # Scale plane to desired square dimensions (primitive plane is 2x2 by default)
-        plane.scale.x = side / 2.0
-        plane.scale.y = side / 2.0
+        # Scale plane to desired explicit dimensions (primitive plane is 2x2 by default)
+        dim_x = float(getattr(self, 'dim_x', getattr(context.scene, 'vivid_surface_dim_x', 2.0)))
+        dim_y = float(getattr(self, 'dim_y', getattr(context.scene, 'vivid_surface_dim_y', 2.0)))
+        plane.scale.x = max(dim_x, 0.01) / 2.0
+        plane.scale.y = max(dim_y, 0.01) / 2.0
 
         # Ensure it lives only in an 'Optimized' collection
         coll_name = "Optimized"
@@ -116,12 +95,19 @@ def register():
     # Define operator properties via __annotations__ BEFORE registering the class,
     # so Blender's RNA system picks them up correctly.
     ann = getattr(VIVID_OT_generate_surface, "__annotations__", {})
-    ann["margin"] = FloatProperty(
-        name="Bounding Box Margin",
-        description="Buffer margin (units) to subtract from each side so the plane fits inside the target's bounding box",
-        default=1.0,
-        min=0.0,
-        soft_max=100.0,
+    ann["dim_x"] = FloatProperty(
+        name="Meters X",
+        description="Width of the generated surface in meters",
+        default=2.0,
+        min=0.01,
+        soft_max=1000.0,
+    )
+    ann["dim_y"] = FloatProperty(
+        name="Meters Y",
+        description="Height of the generated surface in meters",
+        default=2.0,
+        min=0.01,
+        soft_max=1000.0,
     )
     VIVID_OT_generate_surface.__annotations__ = ann
     bpy.utils.register_class(VIVID_OT_generate_surface)

@@ -1,0 +1,10 @@
+{
+  "Biome": ["Katlahraun", "Kleifarvatn"],
+  "Country": ["Iceland", "United States"],
+  "Region": ["Reykjanes", "Pennsylvania"],
+  "Location": ["Katlahraun", "Lancaster"],
+  "Category": ["Tile", "Bark", "Wood", "Siding", "Roofing", "Rock", "Sand", "Soil", "Concrete"],
+  "CaptureDevice": ["Nikon D5500", "DJI Air 3"],
+  "Size": ["Tiny","Small","Medium","Big","Huge","Massive"],
+  "Labels": ["rocky", "lava", "beach", "mossy", "old", "dirty", "architecture", "urban"]
+}

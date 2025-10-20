@@ -1,4 +1,4 @@
-# vivid_arts_toolbox/panel.py
+# vivid_arts_toolbox/panel_asset.py
 import bpy
 from bpy.types import Panel
 
@@ -8,14 +8,8 @@ class VIVID_PT_main_panel_asset(Panel):
     bl_category   = "Asset"
     bl_label      = "VIVID Arts Toolbox"
     bl_options    = {'HIDE_HEADER'}
-
-    @classmethod
-    def poll(cls, context):
-        return True
-
     def draw(self, context):
         pass
-
 
 class VIVID_PT_surface(Panel):
     bl_space_type = 'VIEW_3D'
@@ -28,7 +22,6 @@ class VIVID_PT_surface(Panel):
         layout = self.layout
         box = layout.box()
         col = box.column(align=True)
-        # Dimensions controls stored on Scene for convenience
         row = col.row(align=True)
         row.prop(context.scene, "vivid_surface_dim_x", text="Meters X")
         row.prop(context.scene, "vivid_surface_dim_y", text="Meters Y")
@@ -66,10 +59,8 @@ class VIVID_PT_bake_textures(Panel):
     def draw(self, context):
         layout = self.layout
         s = getattr(context.scene, "vivid_designer_bake", None)
-
         box = layout.box()
         box.label(text="Settings", icon='PREFERENCES')
-
         if s:
             row = box.row(align=True); row.prop(s, "export_bake_meshes", text="Export Bake Meshes")
             row = box.row(align=True); row.prop(s, "setup_material",      text="Setup Material")
@@ -77,7 +68,6 @@ class VIVID_PT_bake_textures(Panel):
             row = box.row(align=True); row.prop(s, "engine",              text="Engine")
         else:
             box.label(text="Designer bake settings not found (scene.vivid_designer_bake).", icon='INFO')
-
         col = layout.column(align=True)
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "bake_designer"):
             col.operator("vivid.bake_designer", text="Bake Designer Textures", icon='RENDER_STILL')
@@ -99,33 +89,6 @@ class VIVID_PT_generate_asset(Panel):
         else:
             col.label(text="Operator vivid.generate_asset not registered.", icon='ERROR')
 
-class VIVID_PT_setup_lods(Panel):
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category   = "LODs"
-    bl_parent_id  = "VIVID_PT_main_panel_lods"
-    bl_label      = "Generate LODs"
-    bl_order      = 30
-    def draw(self, context):
-        layout = self.layout
-        box = layout.box()
-        box.label(text="LOD Setup Settings", icon='OUTLINER_OB_MESH')
-
-        s = getattr(context.scene, "vivid_lod_props", None)
-        if s:
-            box.prop(s, "generate_shadow_proxies")
-            row = box.row(align=True)
-            row.prop(s, "generate_collider")
-            row.prop(s, "is_convex_collider")
-        else:
-            box.label(text="Scene LOD properties not found (scene.vivid_lod_props).", icon='INFO')
-
-        col = layout.column(align=True)
-        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "setup_lods"):
-            col.operator("vivid.setup_lods", text="Setup LODs", icon='MOD_DECIM')
-        else:
-            col.label(text="Operator vivid.setup_lods not registered.", icon='ERROR')
-
 class VIVID_PT_export_asset(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -141,7 +104,6 @@ class VIVID_PT_export_asset(Panel):
         else:
             col.label(text="Operator vivid.export_asset not registered.", icon='ERROR')
 
-# NEW — Export to Painter (default OPEN because we don't set DEFAULT_CLOSED)
 class VIVID_PT_export_to_painter(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -152,7 +114,6 @@ class VIVID_PT_export_to_painter(Panel):
     def draw(self, context):
         layout = self.layout
         v = getattr(context.scene, "vivid_export_to_painter", None)
-
         box = layout.box()
         row = box.row(align=True)
         if v:
@@ -163,15 +124,11 @@ class VIVID_PT_export_to_painter(Panel):
             row.prop(v, "open_after", text="Open Painter after export")
         else:
             box.label(text="Export-to-Painter props not found (scene.vivid_export_to_painter).", icon='INFO')
-
         col = layout.column(align=True)
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "export_to_painter"):
             col.operator("vivid.export_to_painter", text="Export to Painter", icon='EXPORT')
         else:
             col.label(text="Operator vivid.export_to_painter not registered.", icon='ERROR')
-
-
-# --------- Panels moved from operators ---------
 
 class VIVID_PT_texture_processing(Panel):
     bl_space_type = 'VIEW_3D'
@@ -180,7 +137,6 @@ class VIVID_PT_texture_processing(Panel):
     bl_parent_id  = "VIVID_PT_main_panel_asset"
     bl_label      = "Texture Processing"
     bl_order      = 15
-
     def draw(self, context):
         layout = self.layout
         s = getattr(context.scene, "vivid_light_removal", None)
@@ -198,118 +154,6 @@ class VIVID_PT_texture_processing(Panel):
         col = layout.column(align=True)
         col.operator("vivid.bake_delit", text="Process Textures", icon='RENDER_STILL')
 
-class VIVID_PT_main_panel_lods(Panel):
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category   = "LODs"
-    bl_label      = "VIVID Arts Toolbox"
-    bl_options    = {'HIDE_HEADER'}
-
-    def draw(self, context):
-        pass
-
-class VIEW3D_PT_shadowproxy_correction(Panel):
-    bl_space_type='VIEW_3D'
-    bl_region_type='UI'
-    bl_category  = "LODs"
-    bl_parent_id = "VIVID_PT_main_panel_lods"
-    bl_label     = "ShadowProxy Correction"
-    bl_order     = 40
-
-    def draw(self,context):
-        s=context.scene; layout=self.layout
-        box=layout.box(); box.label(text="Solve Settings",icon='MOD_SHRINKWRAP')
-        box.prop(s,"sp_margin")
-        box.prop(s,"sp_grid")
-        box.prop(s,"sp_edge_samples")
-        row = box.row(align=True)
-        row.prop(s,"sp_passes")
-        row.prop(s,"sp_v_passes")
-        box.prop(s,"sp_max_push")
-        row=box.row(align=True); row.prop(s,"sp_token_lod"); row.prop(s,"sp_token_proxy")
-
-        layout.separator()
-        col=layout.column(align=True)
-        op=col.operator("object.shadowproxy_fit_all_pairs",text="Fit Shadow Proxies",icon='MOD_SHRINKWRAP')
-        op.margin=s.sp_margin; op.grid=s.sp_grid; op.edge_samples=s.sp_edge_samples
-        op.passes=s.sp_passes; op.v_passes=s.sp_v_passes; op.max_push=s.sp_max_push
-        op.only_selected=s.sp_only_selected_pairs
-        col.prop(s,"sp_only_selected_pairs")
-        col.operator("object.shadowproxy_list_pairs",text="List Pairs",icon='INFO')
-        layout.separator()
-        box2 = layout.box(); box2.label(text="LOD Textures", icon='RENDER_STILL')
-        box2.label(text="Bake LOD Textures (coming soon)", icon='RENDER_STILL')
-
-class VIVID_PT_main_panel_meta(Panel):
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category   = "Metadata"
-    bl_label      = "VIVID Arts Toolbox"
-    bl_options    = {'HIDE_HEADER'}
-
-    def draw(self, context):
-        pass
-
-class VIVID_PT_metadata(Panel):
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category   = "Metadata"
-    bl_parent_id  = "VIVID_PT_main_panel_meta"
-    bl_label      = "Metadata"
-    bl_order      = 10
-    def draw(self, context):
-        layout = self.layout
-        s = getattr(context.scene, 'vivid_metadata', None)
-        col = layout.column(align=True)
-        # Buttons
-        col.operator("vivid.export_metadata_json", text="Export Metadata JSON", icon='EXPORT')
-        row = layout.row(align=True)
-        row.operator("vivid.reload_local_json", text="Reload Local JSON", icon='FILE_REFRESH')
-        sub = layout.column(align=True)
-        sub.prop(context.scene, "vivid_metadata_reference_path", text="Reference JSON")
-        sub.operator("vivid.load_reference_json", text="Load Reference JSON", icon='FILE_FOLDER')
-        layout.separator()
-        if s:
-            box = layout.box(); box.label(text="Main", icon='INFO')
-            col = box.column(align=True)
-            col.prop(s, 'asset_id')
-            col.prop(s, 'display_name')
-            col.prop(s, 'asset_type')
-            col.prop(s, 'size')
-            col.prop(s, 'biome')
-            col.prop(s, 'category')
-            col.prop(s, 'country')
-            col.prop(s, 'region')
-            col.prop(s, 'location')
-            col.prop(s, 'date_captured')
-            col.prop(s, 'version')
-
-            box = layout.box(); box.label(text="Polycounts", icon='MESH_DATA')
-            col = box.column(align=True)
-            col.prop(s, 'poly_cinema')
-            col.prop(s, 'poly_lod0')
-            col.prop(s, 'poly_lod1')
-            col.prop(s, 'poly_lod2')
-            col.prop(s, 'poly_lod3')
-
-            box = layout.box(); box.label(text="Source", icon='CAMERA_DATA')
-            col = box.column(align=True)
-            col.prop(s, 'source_name')
-            col.prop(s, 'capture_device')
-            col.prop(s, 'source_notes')
-
-            box = layout.box(); box.label(text="Importer", icon='IMPORT')
-            col = box.column(align=True)
-            col.prop(s, 'importer_allow_udim_merge')
-            col.prop(s, 'importer_allow_tessellation')
-            col.prop(s, 'importer_has_collision')
-            col.prop(s, 'importer_static')
-
-            box = layout.box(); box.label(text="Labels", icon='BOOKMARKS')
-            box.prop(s, 'labels')
-        else:
-            layout.label(text="Metadata properties not found.", icon='ERROR')
-
 _classes = (
     VIVID_PT_main_panel_asset,
     VIVID_PT_surface,
@@ -319,11 +163,6 @@ _classes = (
     VIVID_PT_export_asset,
     VIVID_PT_export_to_painter,
     VIVID_PT_texture_processing,
-    VIVID_PT_main_panel_lods,
-    VIVID_PT_setup_lods,
-    VIEW3D_PT_shadowproxy_correction,
-    VIVID_PT_main_panel_meta,
-    VIVID_PT_metadata,
 )
 
 def register():

@@ -5,51 +5,61 @@ from bpy.props import StringProperty, BoolProperty
 # Get the directory of the current script (preferences.py)
 addon_dir = os.path.dirname(__file__)
 
+def _default_release_dir():
+    # Prefer network path if reachable; otherwise empty
+    p = "\\\\TheArchive_2049\\VIVID Arts Library\\Release"
+    return p if os.path.isdir(p) else ""
+
 class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
-
-    asset_destination_path: StringProperty(
+    __annotations__ = {}
+    __annotations__['asset_destination_path'] = StringProperty(
         name="Asset Destination",
         subtype='DIR_PATH',
         default="//",
         description="Directory for final asset export."
     )
-    designer_preset_filepath: StringProperty(
+    __annotations__['designer_preset_filepath'] = StringProperty(
         name="Designer JSON Preset",
         subtype='FILE_PATH',
         default=os.path.join(addon_dir, "SDesigner_Photogrammetry.json"),
         description="Path to your Substance Designer JSON preset file. Defaults to local addon file."
     )
-    meshlab_executable_path: StringProperty(
+    __annotations__['meshlab_executable_path'] = StringProperty(
         name="MeshLab Server Path (Optional)",
         subtype='FILE_PATH',
         description="Full path to meshlabserver.exe. Used if PyMeshLab automation is disabled or fails.",
         default=""
     )
-    substance_baker_path: StringProperty(
+    __annotations__['substance_baker_path'] = StringProperty(
         name="Substance Baker (substance3d_baker.exe)",
         description="Path to Adobe Substance 3D Designer's headless baker executable",
         subtype='FILE_PATH',
         default=""
     )
-    enable_pymeshlab_automation: BoolProperty(
+    __annotations__['enable_pymeshlab_automation'] = BoolProperty(
         name="Enable PyMeshLab Automation",
         default=False,
         description="Use PyMeshLab library for LOD generation (requires installation). Disable for manual MeshLab or meshlabserver.exe fallback."
     )
-
     # NEW — Painter integration
-    painter_exe_path: StringProperty(
+    __annotations__['painter_exe_path'] = StringProperty(
         name="Substance Painter (Adobe Substance 3D Painter.exe)",
         subtype='FILE_PATH',
         description="Path to Substance 3D Painter executable (e.g. Substance 3D Painter.exe)",
         default=""
     )
-    texture_export_dir: StringProperty(
+    __annotations__['texture_export_dir'] = StringProperty(
         name="Texture Destination",
         subtype='DIR_PATH',
         description="Directory Painter should export textures to (General Export → Output Directory)",
         default=""
+    )
+    __annotations__['release_directory'] = StringProperty(
+        name="Release Directory",
+        subtype='DIR_PATH',
+        description="Root of Release tree where final FBX/Textures are stored and LOD-specific bakes are saved.",
+        default=_default_release_dir()
     )
 
     def draw(self, context):
@@ -59,6 +69,7 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
         # Primary export/config paths (ordered for workflow)
         layout.prop(self, "asset_destination_path")
         layout.prop(self, "texture_export_dir")
+        layout.prop(self, "release_directory")
         layout.prop(self, "substance_baker_path")
         # Substance Painter path shown inline after Substance Baker
         layout.prop(self, "painter_exe_path")

@@ -1,0 +1,73 @@
+{
+  "AssetID": "KAT_Cliff_Short_01",
+  "DisplayName": "Cliff Short 01",
+  "AssetType": "Model",
+  "Style": "Scan",
+  
+  "Biome": "Katlahraun",
+  "Country": "Iceland",
+  "Region": "Reykjanes",
+  "Location": "Katlahraun",
+  "Category": "Rock",
+
+  "DateCaptured": "2024-05-20",
+  "LastUpdated": "2025-10-17",
+  "Version": "1.0",
+  
+  "Dimensions": "Unknown",
+  "Size": "Huge",
+
+  "Geometry": {
+    "Polygons_Cinema": 0,
+    "Polygons_LOD0": 0,
+    "Polygons_LOD1": 0,
+    "Polygons_LOD2": 0,
+    "Polygons_LOD3": 0,
+    "Polygons_ShadowProxy_LOD0": 0,
+    "Polygons_ShadowProxy_LOD1": 0,
+    "Polygons_ShadowProxy_LOD2": 0,
+    "Polygons_ShadowProxy_LOD3": 0,
+    "HasCinema": true,
+    "LODs": ["LOD0", "LOD1", "LOD2", "LOD3"],
+    "ShadowProxies": ["LOD0", "LOD1", "LOD2", "LOD3"],
+    "UvPolicy": "Preserve",
+    "Manifold": false
+  },
+
+  "Textures": {
+    "Albedo": true,
+    "Normal": true,
+    "AO": true,
+    "Roughness": true,
+    "Displacement": true,
+    "Metalness": false,
+    "Fuzz": true,
+    "Translucency": false,
+    "TextureSets": "4"
+  },
+
+  "Source": {
+    "SourceName": "KAT_Cliff_Short_01",
+    "CaptureDevice": "DJI Air 3",
+    "Notes": "Captured on the southern coast of Iceland in the Katlahraun lava fields during a day that was somehow simultaneously sunny and rainy."
+  },
+
+  "Importer": {
+    "AllowUDIMMerge": true,
+    "AllowTessellationOnLOD0": true,
+    "HasCollision": true,
+    "Static": true
+  },
+
+  "Labels": [
+    "cliff",
+    "rock",
+    "basalt",
+    "fuzz",
+    "iceland",
+    "katlahraun",
+    "huge",
+    "moss",
+    "wide"
+  ]
+}

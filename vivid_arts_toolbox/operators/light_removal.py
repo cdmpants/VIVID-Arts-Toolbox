@@ -1,7 +1,7 @@
 
 import bpy, os, re, math
 from bpy.types import Operator, PropertyGroup, Panel
-from bpy.props import EnumProperty, PointerProperty
+from bpy.props import EnumProperty, PointerProperty, BoolProperty
 
 from ..bake_textures import _folders, _find_baked_textures_ex, _remove_suffix, _find_optimized_object, _find_baked_textures_by_suffix_udim
 
@@ -19,11 +19,31 @@ class VIVID_LightRemovalSettings(PropertyGroup):
         items=[("CPU","CPU",""),("GPU","GPU","")],
         default="GPU",
     )
+    __annotations__['save_only_release'] = BoolProperty(
+        name="Save only to Release",
+        description="Only save outputs to the Release folder (placeholder)",
+        default=False,
+    )
+    __annotations__['sharpen'] = BoolProperty(
+        name="Sharpen",
+        description="Apply sharpen filter to result (placeholder)",
+        default=False,
+    )
+    __annotations__['de_light_with_lightmap'] = BoolProperty(
+        name="De-light with Lightmap",
+        description="Use lightmap to assist de-lighting (placeholder)",
+        default=False,
+    )
+    __annotations__['make_seamless'] = BoolProperty(
+        name="Make Seamless",
+        description="Attempt to make BaseColor seamless (placeholder)",
+        default=False,
+    )
 
 class VIVID_OT_bake_delit(Operator):
     bl_idname = "vivid.bake_delit"
-    bl_label = "Bake Delit Texture"
-    bl_description = "Cycles diffuse-color bake to a new image in the 'Delit' node"
+    bl_label = "Process Textures"
+    bl_description = "Process textures (de-lighting pipeline). Outputs will be saved under ProcessTextures."
 
     def execute(self, context):
         s = getattr(context.scene, "vivid_light_removal", None)
@@ -114,38 +134,31 @@ class VIVID_OT_bake_delit(Operator):
         except Exception:
             pass
 
-        _, _, bake_tex = _folders()
+        # Output directory: ProcessTextures next to the .blend
+        root = bpy.path.abspath("//") or os.getcwd()
+        process_tex = os.path.join(root, "ProcessTextures")
+        os.makedirs(process_tex, exist_ok=True)
         res = int(s.bake_resolution)
 
-        def ensure_delit(mat):
+        def ensure_target_tex_node(mat):
             if not (mat and mat.use_nodes and mat.node_tree):
                 return None, None
             nt = mat.node_tree
-            node = nt.nodes.get("Delit")
+            node = nt.nodes.get("BaseColor") or nt.nodes.get("BaseColorOut") or nt.nodes.get("Delit")
             if not node:
                 node = nt.nodes.new("ShaderNodeTexImage")
-                node.name = "Delit"
-                node.label = "Delit"
+                node.name = "BaseColor"
+                node.label = "BaseColor"
                 node.location = (-800, 300)
             return nt, node
-
-        # Try to locate UDIM-specific DLBC files for better naming
-        dlbc_by_udim = {}
-        try:
-            udim_tex = _find_baked_textures_by_suffix_udim(bake_tex, base_name)
-            for u, maps in (udim_tex or {}).items():
-                if maps and maps.get('dlbc'):
-                    dlbc_by_udim[u] = maps['dlbc']
-        except Exception:
-            pass
 
         baked_files = []
         if udim_mode and len(slots) > 0:
             # Per-slot bake
             for i, sl in enumerate(slots):
                 mat = sl.material
-                nt, delit_node = ensure_delit(mat)
-                if not (nt and delit_node):
+                nt, tex_node = ensure_target_tex_node(mat)
+                if not (nt and tex_node):
                     continue
                 udim = _extract_udim(mat.name) if mat and getattr(mat, 'name', None) else '1001'
                 # Compute UDIM tile offsets (1001 = (0,0), 1002 = (1,0), 1011 = (0,1), etc.)
@@ -156,7 +169,7 @@ class VIVID_OT_bake_delit(Operator):
                     v_off = t // 10
                 except Exception:
                     u_off = 0; v_off = 0
-                img_name = f"{base_name}_Delit_{udim}"
+                img_name = f"{base_name}_BaseColor_{udim}"
                 img = bpy.data.images.get(img_name)
                 if img is None:
                     img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
@@ -174,14 +187,14 @@ class VIVID_OT_bake_delit(Operator):
                     img.source = 'GENERATED'
                 except Exception:
                     pass
-                delit_node.image = img
+                tex_node.image = img
                 try:
-                    delit_node.image.colorspace_settings.name = "sRGB"
+                    tex_node.image.colorspace_settings.name = "sRGB"
                 except Exception:
                     pass
                 # Make material active to ensure correct node context
                 obj.active_material_index = i
-                nt.nodes.active = delit_node
+                nt.nodes.active = tex_node
 
                 # Temporarily offset UVs for faces in this material slot that live in this UDIM tile
                 me = obj.data
@@ -232,24 +245,18 @@ class VIVID_OT_bake_delit(Operator):
                 except Exception:
                     pass
 
-                # Save per-UDIM image
-                dlbc = dlbc_by_udim.get(udim)
-                if dlbc:
-                    outfile = re.sub(r"(?i)_dlbc(\.[^\.]+)?$", f"_Delit_{udim}.png", dlbc)
-                    if outfile == dlbc:
-                        outfile = os.path.join(bake_tex, f"{base_name}_Delit_{udim}.png")
-                else:
-                    outfile = os.path.join(bake_tex, f"{base_name}_Delit_{udim}.png")
+                # Save per-UDIM image to ProcessTextures as TIFF
+                outfile = os.path.join(process_tex, f"{base_name}_BaseColor_{udim}.tif")
                 os.makedirs(os.path.dirname(outfile), exist_ok=True)
                 img.filepath_raw = outfile
-                img.file_format = 'PNG'
+                img.file_format = 'TIFF'
                 try:
                     img.save()
                 except Exception as e:
-                    self.report({'ERROR'}, f"Failed to save Delit image ({udim}): {e}")
+                    self.report({'ERROR'}, f"Failed to save BaseColor image ({udim}): {e}")
                 baked_files.append(outfile)
             msg = ", ".join([os.path.basename(x) for x in baked_files]) if baked_files else "<none>"
-            self.report({'INFO'}, f"Delit baked (UDIM): {msg}")
+            self.report({'INFO'}, f"BaseColor processed (UDIM): {msg}")
         else:
             # Single bake
             mat = obj.active_material or (obj.material_slots[0].material if obj.material_slots else None)
@@ -259,13 +266,13 @@ class VIVID_OT_bake_delit(Operator):
                 if prev_layer_denoise is not None: context.view_layer.cycles.use_denoising = prev_layer_denoise
                 return {'CANCELLED'}
             nt = mat.node_tree
-            delit_node = nt.nodes.get("Delit")
-            if not delit_node:
-                delit_node = nt.nodes.new("ShaderNodeTexImage")
-                delit_node.name = "Delit"
-                delit_node.label = "Delit"
-                delit_node.location = (-800, 300)
-            img_name = f"{base_name}_Delit"
+            tex_node = nt.nodes.get("BaseColor") or nt.nodes.get("BaseColorOut") or nt.nodes.get("Delit")
+            if not tex_node:
+                tex_node = nt.nodes.new("ShaderNodeTexImage")
+                tex_node.name = "BaseColor"
+                tex_node.label = "BaseColor"
+                tex_node.location = (-800, 300)
+            img_name = f"{base_name}_BaseColor"
             img = bpy.data.images.get(img_name)
             if img is None:
                 img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
@@ -283,12 +290,12 @@ class VIVID_OT_bake_delit(Operator):
                 img.source = 'GENERATED'
             except Exception:
                 pass
-            delit_node.image = img
+            tex_node.image = img
             try:
-                delit_node.image.colorspace_settings.name = "sRGB"
+                tex_node.image.colorspace_settings.name = "sRGB"
             except Exception:
                 pass
-            nt.nodes.active = delit_node
+            nt.nodes.active = tex_node
             try:
                 bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, target='IMAGE_TEXTURES', use_clear=True)
             except Exception as e:
@@ -296,21 +303,16 @@ class VIVID_OT_bake_delit(Operator):
                 if prev_layer_denoise is not None: context.view_layer.cycles.use_denoising = prev_layer_denoise
                 self.report({'ERROR'}, f"Bake failed: {e}")
                 return {'CANCELLED'}
-            dlbc, _, _, _ = _find_baked_textures_ex(bake_tex)
-            if dlbc:
-                outfile = re.sub(r"(?i)_dlbc(\.[^\.]+)?$", "_Delit.png", dlbc)
-                if outfile == dlbc:
-                    outfile = os.path.join(bake_tex, f"{base_name}_Delit.png")
-            else:
-                outfile = os.path.join(bake_tex, f"{base_name}_Delit.png")
+            # Save single image to ProcessTextures as TIFF
+            outfile = os.path.join(process_tex, f"{base_name}_BaseColor.tif")
             os.makedirs(os.path.dirname(outfile), exist_ok=True)
             img.filepath_raw = outfile
-            img.file_format = 'PNG'
+            img.file_format = 'TIFF'
             try:
                 img.save()
             except Exception as e:
-                self.report({'ERROR'}, f"Failed to save Delit image: {e}")
-            self.report({'INFO'}, f"Delit baked → {outfile}")
+                self.report({'ERROR'}, f"Failed to save BaseColor image: {e}")
+            self.report({'INFO'}, f"BaseColor processed → {outfile}")
 
         # restore visibility and denoise
         try:
