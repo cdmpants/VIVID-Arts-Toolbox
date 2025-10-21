@@ -6,11 +6,6 @@ from ..utils import resource_or_legacy
 from bpy.types import Operator
 
 
-def _addon_dir():
-    import pathlib
-    return str(pathlib.Path(__file__).resolve().parent.parent)
-
-
 def _release_asset_dir(context):
     # Reuse logic from export_asset without importing to avoid circulars
     prefs = context.preferences.addons[__package__.split('.')[0]].preferences
@@ -174,13 +169,8 @@ class VIVID_OT_output_renders(Operator):
         # Resolve Render.blend path
         render_blend = str(resource_or_legacy('Render.blend'))
         if not os.path.isfile(render_blend):
-            # Fallback for environments where .blend1 is versioned
-            alt = str(resource_or_legacy('Render.blend1'))
-            if os.path.isfile(alt):
-                render_blend = alt
-            else:
-                self.report({'ERROR'}, f"Render.blend not found in addon: {render_blend}")
-                return {'CANCELLED'}
+            self.report({'ERROR'}, f"Render.blend not found in add-on resources: {render_blend}")
+            return {'CANCELLED'}
 
         # Prepare output folder (Release/Renders)
         try:

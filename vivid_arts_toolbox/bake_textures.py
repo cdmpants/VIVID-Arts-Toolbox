@@ -18,9 +18,7 @@ def _default_baker_path():
 def _blend_dir():
     return bpy.path.abspath("//")
 
-def _addon_dir():
-    # Folder where this file lives (the vivid_arts_toolbox package directory)
-    return os.path.dirname(os.path.abspath(__file__))
+# _addon_dir was used for legacy resource lookup; no longer needed
 
 def _folders():
     root = _blend_dir()
