@@ -27,6 +27,8 @@ from .operators.export_asset import VIVID_OT_export_asset
 from .operators.warning_dialog import VIVID_OT_warning_dialog
 from .operators.create_cinema_variant import VIVID_OT_create_cinema_variant
 from .operators.export_lods import VIVID_OT_export_lods
+from .operators.generate_lod_cages import VIVID_OT_generate_lod_cages
+from .operators.bake_lod_textures import VIVID_OT_bake_lod_textures
 
 # Modules with their own register() functions
 from .operators import shadowproxy_correction
@@ -48,6 +50,8 @@ _classes = (
     VIVID_OT_export_asset,
     VIVID_OT_create_cinema_variant,
     VIVID_OT_export_lods,
+    VIVID_OT_generate_lod_cages,
+    VIVID_OT_bake_lod_textures,
 )
 
 def register():

@@ -56,6 +56,8 @@ class VIVID_PT_metadata(Panel):
             row.enabled = False
             row.prop(s, 'asset_id')
             col.prop(s, 'display_name')
+            # Description under DisplayName
+            col.prop(s, 'description', text="Description")
             col.prop(s, 'asset_type')
             col.prop(s, 'size')
             col.prop(s, 'biome')
@@ -102,11 +104,7 @@ class VIVID_PT_metadata(Panel):
             # Legacy string UI for backward compatibility
             box.prop(s, 'labels')
 
-            # Description section at bottom
-            desc_box = layout.box(); desc_box.label(text="Description", icon='TEXT')
-            # Use a simple multiline text layout via split across multiple lines if supported
-            desc_col = desc_box.column(align=True)
-            desc_col.prop(s, 'description', text="", expand=False)
+            # (Description moved under Main)
         else:
             layout.label(text="Metadata properties not found.", icon='ERROR')
 

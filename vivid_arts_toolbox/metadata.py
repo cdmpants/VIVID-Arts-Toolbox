@@ -154,7 +154,7 @@ class VIVID_OT_export_metadata_json(Operator):
         out_dir = _blend_dir()
         out_path = os.path.join(out_dir, f"{base}_meta.json")
 
-        now = datetime.datetime.now().strftime('%Y-%m-%d')
+        now = datetime.datetime.now().strftime('%m/%d/%Y %H:%M:%S')
         variant_count = _count_model_variants()
         # Pull tiling flags from Texture Processing settings
         lr = getattr(context.scene, 'vivid_light_removal', None)
@@ -166,6 +166,7 @@ class VIVID_OT_export_metadata_json(Operator):
             "Main": {
                 "AssetID": s.asset_id or base,
                 "DisplayName": s.display_name or base,
+                "Description": getattr(s, 'description', "") or "",
                 "AssetType": s.asset_type,
                 "Biome": s.biome,
                 "Country": s.country,
@@ -201,7 +202,6 @@ class VIVID_OT_export_metadata_json(Operator):
                 "Static": s.importer_static,
             },
             "Labels": ([it.value for it in s.labels_coll] if getattr(s, 'labels_coll', None) and len(s.labels_coll) > 0 else [lbl.strip() for lbl in (s.labels or '').split(',') if lbl.strip()]),
-            "Description": getattr(s, 'description', "") or "",
             # "Textures": to be filled later
         }
 
@@ -260,6 +260,7 @@ class VIVID_OT_reload_local_json(Operator):
             m = data.get('Main', {})
             s.asset_id = m.get('AssetID', '')
             s.display_name = m.get('DisplayName', '')
+            s.description = m.get('Description', '')
             s.asset_type = m.get('AssetType', 'Model')
             s.biome = m.get('Biome', 'Katlahraun')
             s.country = m.get('Country', 'Iceland')

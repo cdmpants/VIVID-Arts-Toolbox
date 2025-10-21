@@ -56,11 +56,7 @@ class VIVID_PT_setup_lods(Panel):
         else:
             col.label(text="Operator vivid.setup_lods not registered.", icon='ERROR')
 
-        col = layout.column(align=True)
-        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "export_lods"):
-            col.operator("vivid.export_lods", text="Export LODs", icon='EXPORT')
-        else:
-            col.label(text="Operator vivid.export_lods not registered.", icon='ERROR')
+        
 
 class VIEW3D_PT_shadowproxy_correction(Panel):
     bl_space_type='VIEW_3D'
@@ -88,14 +84,53 @@ class VIEW3D_PT_shadowproxy_correction(Panel):
         op.only_selected=s.sp_only_selected_pairs
         col.prop(s,"sp_only_selected_pairs")
     # Removed List Pairs button
-        layout.separator()
-        box2 = layout.box(); box2.label(text="LOD Textures", icon='RENDER_STILL')
-        box2.label(text="Bake LOD Textures (coming soon)", icon='RENDER_STILL')
+
+class VIVID_PT_lod_textures(Panel):
+    bl_space_type='VIEW_3D'
+    bl_region_type='UI'
+    bl_category  = "LOD"
+    bl_parent_id = "VIVID_PT_main_panel_lods"
+    bl_label     = "LOD Textures"
+    bl_order     = 80
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column(align=True)
+        # Generate LOD Cages
+        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "generate_lod_cages"):
+            col.operator("vivid.generate_lod_cages", text="Generate LOD Cages", icon='MESH_GRID')
+        else:
+            col.label(text="Operator vivid.generate_lod_cages not registered.", icon='ERROR')
+        # Bake LOD Textures
+        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "bake_lod_textures"):
+            col.operator("vivid.bake_lod_textures", text="Bake LOD Textures", icon='RENDER_STILL')
+        else:
+            col.label(text="Operator vivid.bake_lod_textures not registered.", icon='ERROR')
+
+class VIVID_PT_export_lods(Panel):
+    bl_space_type='VIEW_3D'
+    bl_region_type='UI'
+    bl_category  = "LOD"
+    bl_parent_id = "VIVID_PT_main_panel_lods"
+    bl_label     = "Export LODs"
+    bl_order     = 100
+
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column(align=True)
+        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "export_lods"):
+            col.operator("vivid.export_lods", text="Export LODs", icon='EXPORT')
+        else:
+            col.label(text="Operator vivid.export_lods not registered.", icon='ERROR')
 
 _classes = (
     VIVID_PT_main_panel_lods,
     VIVID_PT_setup_lods,
     VIEW3D_PT_shadowproxy_correction,
+    VIVID_PT_lod_textures,
+    VIVID_PT_export_lods,
+    # New panels for LOD Textures and Export at bottom
+    
 )
 
 def register():
