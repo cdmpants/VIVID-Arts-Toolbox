@@ -191,8 +191,8 @@ class VIVID_OT_export_metadata_json(Operator):
                 "LOD3": s.poly_lod3 or None,
             },
             "Source": {
-                "Source Name": s.source_name or "",
                 "Capture Device": s.capture_device,
+                "Source Name": s.source_name or "",
                 "Notes": s.source_notes or "",
             },
             "Importer": {

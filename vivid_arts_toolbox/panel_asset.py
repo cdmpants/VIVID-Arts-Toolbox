@@ -90,7 +90,7 @@ class VIVID_PT_generate_asset(Panel):
             col.label(text="Operator vivid.generate_asset not registered.", icon='ERROR')
         # Create Variant button (requires operator implementation later)
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "create_cinema_variant"):
-            col.operator("vivid.create_cinema_variant", text="Create Variant", icon='DUPLICATE')
+            col.operator("vivid.create_cinema_variant", text="Create Cinema Variant", icon='DUPLICATE')
         # Move Export Asset below here and rename
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "export_asset"):
             col.operator("vivid.export_asset", text="Export Cinema Model", icon='EXPORT')

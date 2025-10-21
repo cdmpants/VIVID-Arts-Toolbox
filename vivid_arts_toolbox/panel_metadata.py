@@ -79,8 +79,9 @@ class VIVID_PT_metadata(Panel):
 
             box = layout.box(); box.label(text="Source", icon='CAMERA_DATA')
             col = box.column(align=True)
-            col.prop(s, 'source_name')
+            # Capture Device above Source Name
             col.prop(s, 'capture_device')
+            col.prop(s, 'source_name')
             col.prop(s, 'source_notes')
 
             box = layout.box(); box.label(text="Importer", icon='IMPORT')

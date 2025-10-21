@@ -24,22 +24,25 @@ class VIVID_PT_setup_lods(Panel):
         box.label(text="LOD Setup Settings", icon='OUTLINER_OB_MESH')
         s = getattr(context.scene, "vivid_lod_props", None)
         if s:
-            # Custom LODs toggle
+            # Custom LODs toggle (always enabled)
             box.prop(s, "custom_lods")
+            # Settings below are disabled when Custom LODs is enabled
+            settings_col = box.column(align=True)
+            settings_col.enabled = not bool(getattr(s, 'custom_lods', False))
             # Collider options and ratio
-            row = box.row(align=True)
+            row = settings_col.row(align=True)
             row.prop(s, "generate_collider")
-            row = box.row(align=True)
+            row = settings_col.row(align=True)
             row.prop(s, "collider_ratio", text="MeshCollider Ratio")
             # LOD target ratios
-            col = box.column(align=True)
+            col = settings_col.column(align=True)
             col.prop(s, "lod0_ratio", text="LOD0 Ratio")
             col.prop(s, "lod1_ratio", text="LOD1 Ratio")
             col.prop(s, "lod2_ratio", text="LOD2 Ratio")
             col.prop(s, "lod3_ratio", text="LOD3 Ratio")
             # ShadowProxy toggle and per-LOD ratios (vertical)
-            box.prop(s, "generate_shadow_proxies")
-            sp_box = box.box()
+            settings_col.prop(s, "generate_shadow_proxies")
+            sp_box = settings_col.box()
             sp_box.label(text="ShadowProxy Ratios")
             sp_col = sp_box.column(align=True)
             sp_col.prop(s, "sp_lod0_ratio", text="SP LOD0")

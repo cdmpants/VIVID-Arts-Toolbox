@@ -18,18 +18,19 @@ _RES_MAP = {
 }
 
 class VIVID_PG_ExportToPainter(PropertyGroup):
-    texture_res: EnumProperty(
+    __annotations__ = {}
+    __annotations__['texture_res'] = EnumProperty(
         name="Texture Resolution",
         description="Target texture size for Painter export",
         items=_RES_ITEMS,
         default="RES_4096",
     )
-    is_surface: BoolProperty(
+    __annotations__['is_surface'] = BoolProperty(
         name="Is Surface",
         description="Use VIVID_Arts_Surface export template instead of VIVID_Arts",
         default=False,
     )
-    open_after: BoolProperty(
+    __annotations__['open_after'] = BoolProperty(
         name="Open Painter after export",
         description="Launch Substance 3D Painter after preparing the .spp",
         default=True,
@@ -61,8 +62,7 @@ class VIVID_OT_export_to_painter(Operator):
             res_px = _RES_MAP.get(props.texture_res, 4096)
             report = VPE.run_export(
                 context=context,
-                painter_exe=prefs.painter_exe_path,
-                texture_export_dir=prefs.texture_export_dir,
+                painter_exe=getattr(prefs, 'painter_exe_path', ''),
                 texture_res=int(res_px),
                 is_surface=props.is_surface,
                 open_after=props.open_after,

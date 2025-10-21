@@ -13,12 +13,6 @@ def _default_release_dir():
 class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
     __annotations__ = {}
-    __annotations__['asset_destination_path'] = StringProperty(
-        name="Asset Destination",
-        subtype='DIR_PATH',
-        default="//",
-        description="Directory for final asset export."
-    )
     __annotations__['designer_preset_filepath'] = StringProperty(
         name="Designer JSON Preset",
         subtype='FILE_PATH',
@@ -26,7 +20,7 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
         description="Path to your Substance Designer JSON preset file. Defaults to local addon file."
     )
     __annotations__['meshlab_executable_path'] = StringProperty(
-        name="MeshLab Server Path (Optional)",
+        name="MeshLab Server Path",
         subtype='FILE_PATH',
         description="Full path to meshlabserver.exe. Used if PyMeshLab automation is disabled or fails.",
         default=""
@@ -49,12 +43,6 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
         description="Path to Substance 3D Painter executable (e.g. Substance 3D Painter.exe)",
         default=""
     )
-    __annotations__['texture_export_dir'] = StringProperty(
-        name="Texture Destination",
-        subtype='DIR_PATH',
-        description="Directory Painter should export textures to (General Export → Output Directory)",
-        default=""
-    )
     __annotations__['release_directory'] = StringProperty(
         name="Release Directory",
         subtype='DIR_PATH',
@@ -67,8 +55,29 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
         layout.label(text="VIVID Arts Toolbox Settings")
 
         # Primary export/config paths (ordered for workflow)
-        layout.prop(self, "asset_destination_path")
-        layout.prop(self, "texture_export_dir")
+        # Auto-fill executables if empty and default locations exist
+        try:
+            if not self.substance_baker_path:
+                cand = r"C:\\Program Files\\Adobe\\Adobe Substance 3D Designer\\substance3d_baker.exe"
+                if os.path.isfile(cand):
+                    self.substance_baker_path = cand
+        except Exception:
+            pass
+        try:
+            if not self.painter_exe_path:
+                cand = r"C:\\Program Files\\Adobe\\Adobe Substance 3D Painter\\Adobe Substance 3D Painter.exe"
+                if os.path.isfile(cand):
+                    self.painter_exe_path = cand
+        except Exception:
+            pass
+        try:
+            if not self.meshlab_executable_path:
+                cand = r"V:\\Dropbox\\Software\\meshlabserver.exe"
+                if os.path.isfile(cand):
+                    self.meshlab_executable_path = cand
+        except Exception:
+            pass
+
         layout.prop(self, "release_directory")
         layout.prop(self, "substance_baker_path")
         # Substance Painter path shown inline after Substance Baker
@@ -90,5 +99,4 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
         else:
             layout.label(text="PyMeshLab automation is disabled.", icon='CHECKBOX_DEHLT')
             layout.prop(self, "meshlab_executable_path")
-            layout.label(text="If 'MeshLab Server Path' is empty, manual MeshLab steps are required.", icon='INFO')
 
