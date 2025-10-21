@@ -79,30 +79,23 @@ class VIVID_PT_generate_asset(Panel):
     bl_region_type = 'UI'
     bl_category   = "Asset"
     bl_parent_id  = "VIVID_PT_main_panel_asset"
-    bl_label      = "Generate Asset"
+    bl_label      = "Cinema Model"
     bl_order      = 20
     def draw(self, context):
         layout = self.layout
         col = layout.column(align=True)
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "generate_asset"):
-            col.operator("vivid.generate_asset", text="Generate Asset", icon='OUTLINER_OB_LIGHTPROBE')
+            col.operator("vivid.generate_asset", text="Generate Cinema Model", icon='OUTLINER_OB_LIGHTPROBE')
         else:
             col.label(text="Operator vivid.generate_asset not registered.", icon='ERROR')
-
-class VIVID_PT_export_asset(Panel):
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category   = "Asset"
-    bl_parent_id  = "VIVID_PT_main_panel_asset"
-    bl_label      = "Export Asset"
-    bl_order      = 50
-    def draw(self, context):
-        layout = self.layout
-        col = layout.column(align=True)
+        # Create Variant button (requires operator implementation later)
+        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "create_cinema_variant"):
+            col.operator("vivid.create_cinema_variant", text="Create Variant", icon='DUPLICATE')
+        # Move Export Asset below here and rename
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "export_asset"):
-            col.operator("vivid.export_asset", text="Export Asset", icon='EXPORT')
-        else:
-            col.label(text="Operator vivid.export_asset not registered.", icon='ERROR')
+            col.operator("vivid.export_asset", text="Export Cinema Model", icon='EXPORT')
+
+## Removed separate Export Asset panel; export button is now under Cinema Model
 
 class VIVID_PT_export_to_painter(Panel):
     bl_space_type = 'VIEW_3D'
@@ -160,7 +153,6 @@ _classes = (
     VIVID_PT_uv_mapping,
     VIVID_PT_bake_textures,
     VIVID_PT_generate_asset,
-    VIVID_PT_export_asset,
     VIVID_PT_export_to_painter,
     VIVID_PT_texture_processing,
 )

@@ -51,7 +51,18 @@ def _find_inputs(bake_mesh_dir):
     high = _glob_one(["*_HighPoly.fbx", "*_highpoly.fbx", "*_HP.fbx"], bake_mesh_dir)
     cage = _glob_one(["*_Cage.fbx", "*_cage.fbx"], bake_mesh_dir)
     diff = _glob_one(["*_u0_v0_diffuse.png", "*_u0_v0_diffuse.*", "*diffuse.*"], bake_mesh_dir)
-    return {"low": low, "high": high, "cage": cage, "diffuse": diff}
+    # Gather additional _Part#_HighPoly FBXs
+    high_parts = []
+    try:
+        pdir = Path(bake_mesh_dir)
+        import re
+        for p in sorted(pdir.glob("*_Part*_HighPoly.fbx")):
+            m = re.search(r"_Part(\d+)_HighPoly\\.fbx$", p.name, re.IGNORECASE)
+            if m:
+                high_parts.append((f"Part{m.group(1)}", str(p)))
+    except Exception:
+        pass
+    return {"low": low, "high": high, "cage": cage, "diffuse": diff, "high_parts": high_parts}
 
 # ------------------------------------------------------------
 # JSON patching (paths + resolution)
@@ -236,6 +247,147 @@ def _apply_udim_to_json(json_path, udim_tiles):
     return dest_json
 
 # ------------------------------------------------------------
+# Multi-highpoly helpers
+# ------------------------------------------------------------
+def _rename_bake_outputs_with_part(output_dir, part_token):
+    try:
+        if not os.path.isdir(output_dir):
+            return
+        tokens = ["_BaseColorTransfer", "_DLBC", "_AOWide", "_DLAO", "_BentNormalOS", "_DLBN", "_NormalOS", "_Normal", "_Normals"]
+        for fn in os.listdir(output_dir):
+            src = os.path.join(output_dir, fn)
+            if not os.path.isfile(src):
+                continue
+            name, ext = os.path.splitext(fn)
+            new_name = None
+            for t in tokens:
+                idx = name.find(t)
+                if idx > 0:
+                    new_name = name[:idx] + f"_{part_token}" + name[idx:] + ext
+                    break
+            if new_name and new_name != fn:
+                dst = os.path.join(output_dir, new_name)
+                try:
+                    os.replace(src, dst)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+def _build_delighter_material_for_dir(base_name, bake_tex_dir, mat_name):
+    mat = bpy.data.materials.get(mat_name)
+    if mat is None:
+        mat = bpy.data.materials.new(mat_name)
+    mat.use_nodes = True
+    # Ensure template present
+    try:
+        pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        pkg_dir = os.path.dirname(__file__)
+    blend_path = os.path.join(pkg_dir, "Delighter.blend")
+    src_name = "Delighter"
+    src_mat = bpy.data.materials.get(src_name)
+    if src_mat is None and os.path.isfile(blend_path):
+        try:
+            with bpy.data.libraries.load(blend_path, link=False) as (data_from, data_to):
+                if src_name in (data_from.materials or []):
+                    data_to.materials = [src_name]
+            src_mat = bpy.data.materials.get(src_name)
+        except Exception:
+            src_mat = None
+    if src_mat and src_mat.node_tree:
+        try:
+            dst_nt = mat.node_tree
+            src_nt = src_mat.node_tree
+            for n in list(dst_nt.nodes):
+                dst_nt.nodes.remove(n)
+            node_map = {}
+            for n in src_nt.nodes:
+                nn = dst_nt.nodes.new(type=n.bl_idname)
+                try:
+                    nn.name = n.name
+                except Exception:
+                    pass
+                nn.label = getattr(n, 'label', nn.label)
+                nn.location = getattr(n, 'location', (0, 0))
+                nn.width = getattr(n, 'width', nn.width)
+                nn.height = getattr(n, 'height', nn.height)
+                nn.hide = getattr(n, 'hide', False)
+                try:
+                    if hasattr(nn, 'node_tree') and hasattr(n, 'node_tree'):
+                        nn.node_tree = n.node_tree
+                except Exception:
+                    pass
+                node_map[n] = nn
+            def _socket_index(list_sockets, sock):
+                try:
+                    return list_sockets[:].index(sock)
+                except ValueError:
+                    try:
+                        names = [s.name for s in list_sockets]
+                        return names.index(getattr(sock, 'name', ''))
+                    except Exception:
+                        return -1
+            for lk in src_nt.links:
+                from_n = node_map.get(lk.from_node)
+                to_n = node_map.get(lk.to_node)
+                if not (from_n and to_n):
+                    continue
+                try:
+                    fi = _socket_index(lk.from_node.outputs, lk.from_socket)
+                    ti = _socket_index(lk.to_node.inputs, lk.to_socket)
+                    if fi >= 0 and ti >= 0:
+                        dst_nt.links.new(from_n.outputs[fi], to_n.inputs[ti])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    dlbc, normal, dlao, dlbn = _find_baked_textures_by_suffix(bake_tex_dir, base_name)
+    try:
+        nt = mat.node_tree
+        def _set_img(node_name, path, cs):
+            node = nt.nodes.get(node_name)
+            if not node or not hasattr(node, 'image'):
+                return
+            node.image = None
+            if not path or not os.path.isfile(path):
+                return
+            try:
+                img = bpy.data.images.load(bpy.path.abspath(path), check_existing=True)
+                try:
+                    if getattr(img, 'packed_file', None):
+                        img.unpack(method='USE_ORIGINAL')
+                except Exception:
+                    pass
+                node.image = img
+                node.image.colorspace_settings.name = cs
+            except Exception:
+                pass
+        _set_img("BaseColorTransfer", dlbc, "sRGB")
+        _set_img("AOWide", dlao, "Non-Color")
+        _set_img("BentNormalOS", dlbn, "Non-Color")
+        norm_node = nt.nodes.get("NormalOS") or nt.nodes.get("Normals") or nt.nodes.get("Normal")
+        if norm_node and normal and os.path.isfile(normal):
+            try:
+                img = bpy.data.images.load(bpy.path.abspath(normal), check_existing=True)
+                try:
+                    if getattr(img, 'packed_file', None):
+                        img.unpack(method='USE_ORIGINAL')
+                except Exception:
+                    pass
+                norm_node.image = img
+                norm_node.image.colorspace_settings.name = "Non-Color"
+            except Exception:
+                pass
+    except Exception:
+        pass
+    try:
+        mat.use_fake_user = True
+    except Exception:
+        pass
+    return mat
+
+# ------------------------------------------------------------
 # Running the baker
 # ------------------------------------------------------------
 def _run_baker(exe_path, json_path, log_path, cwd, use_cpu=False):
@@ -279,7 +431,7 @@ def _export_bake_meshes_local(bake_mesh_dir):
     - Restore prior visibility state after export
     """
     # Find targets
-    opt = None; cage = None
+    opt = None; cage = None; highs = []
     for o in bpy.data.objects:
         if o.type != 'MESH':
             continue
@@ -287,8 +439,15 @@ def _export_bake_meshes_local(bake_mesh_dir):
             opt = o
         elif o.name.endswith('_Cage') and not cage:
             cage = o
-        if opt and cage:
-            break
+        elif o.name.endswith('_HighPoly'):
+            highs.append(o)
+        else:
+            try:
+                import re
+                if re.search(r"_Part\d+_HighPoly$", o.name):
+                    highs.append(o)
+            except Exception:
+                pass
 
     if not opt:
         return False
@@ -300,6 +459,9 @@ def _export_bake_meshes_local(bake_mesh_dir):
     items = [(opt, os.path.join(bake_mesh_dir, f"{base}_Optimized.fbx"))]
     if cage:
         items.append((cage, os.path.join(bake_mesh_dir, f"{base}_Cage.fbx")))
+    # Export all highpoly candidates
+    for hp in highs:
+        items.append((hp, os.path.join(bake_mesh_dir, f"{hp.name}.fbx")))
 
     # Helper: find the LayerCollection that maps to a given collection
     root_lc = bpy.context.view_layer.layer_collection
@@ -749,20 +911,53 @@ class VIVID_OT_bake_designer(Operator):
         # --- Start timer ---
         start_time = time.time()
 
-        # Patch + run a single JSON
-        log_path = os.path.join(bake_mesh, "bake_designer.log")
-        gen_main = os.path.join(bake_mesh, "_generated_bake_preset.json")
-        _load_and_patch_json(main_json, files, bake_tex, gen_main, res_px)
-
-        # UDIM detection from active *_Optimized object and JSON patching (uv_tiles, is_udim)
+        # Multi-highpoly: if _Part#_HighPoly FBXs exist, bake each into a subfolder
+        parts = files.get("high_parts") or []
+        base_name = None
         try:
             opt_obj = _find_optimized_object()
-            udim_tiles = _udim_tiles_from_object(opt_obj) if opt_obj else []
-            if udim_tiles and (len(udim_tiles) > 1 or udim_tiles != [(0, 0)]):
-                _apply_udim_to_json(gen_main, udim_tiles)
+            if opt_obj:
+                nm = opt_obj.name
+                base_name = nm[:-10] if nm.endswith('_Optimized') else nm
         except Exception:
-            pass
-        rc_total = _run_baker(exe_path, gen_main, log_path, cwd=bake_mesh, use_cpu=use_cpu)
+            base_name = None
+
+        rc_total = 0
+        if parts:
+            for part_token, hp in parts:
+                out_dir = os.path.join(bake_tex, part_token)
+                os.makedirs(out_dir, exist_ok=True)
+                files_local = dict(files)
+                files_local['high'] = hp
+                log_path = os.path.join(bake_mesh, f"bake_{part_token}.log")
+                gen_json = os.path.join(bake_mesh, f"_generated_bake_{part_token}.json")
+                _load_and_patch_json(main_json, files_local, out_dir, gen_json, res_px)
+                try:
+                    udim_tiles = _udim_tiles_from_object(opt_obj) if opt_obj else []
+                    if udim_tiles and (len(udim_tiles) > 1 or udim_tiles != [(0, 0)]):
+                        _apply_udim_to_json(gen_json, udim_tiles)
+                except Exception:
+                    pass
+                rc = _run_baker(exe_path, gen_json, log_path, cwd=bake_mesh, use_cpu=use_cpu)
+                rc_total = rc_total or rc
+                _rename_bake_outputs_with_part(out_dir, part_token)
+                if base_name:
+                    _build_delighter_material_for_dir(base_name, out_dir, f"{base_name}_{part_token}")
+        else:
+            # Patch + run a single JSON
+            log_path = os.path.join(bake_mesh, "bake_designer.log")
+            gen_main = os.path.join(bake_mesh, "_generated_bake_preset.json")
+            _load_and_patch_json(main_json, files, bake_tex, gen_main, res_px)
+
+            # UDIM detection from active *_Optimized object and JSON patching (uv_tiles, is_udim)
+            try:
+                opt_obj = _find_optimized_object()
+                udim_tiles = _udim_tiles_from_object(opt_obj) if opt_obj else []
+                if udim_tiles and (len(udim_tiles) > 1 or udim_tiles != [(0, 0)]):
+                    _apply_udim_to_json(gen_main, udim_tiles)
+            except Exception:
+                pass
+            rc_total = _run_baker(exe_path, gen_main, log_path, cwd=bake_mesh, use_cpu=use_cpu)
 
         # --- Stop timer ---
         duration = time.time() - start_time
@@ -776,10 +971,13 @@ class VIVID_OT_bake_designer(Operator):
             else:
                 self.report({'WARNING'}, "No *_Optimized object found to assign material.")
 
-        if rc_total != 0:
-            self.report({'WARNING'}, f"Designer baking finished with warnings/errors in {duration:.1f}s. See log: {log_path}")
+        if parts:
+            self.report({'INFO'}, f"Designer baking complete for {len(parts)} highpoly parts in {duration:.1f}s → {bake_tex}\\Part#")
         else:
-            self.report({'INFO'}, f"Designer baking complete in {duration:.1f}s → {bake_tex}")
+            if rc_total != 0:
+                self.report({'WARNING'}, f"Designer baking finished with warnings/errors in {duration:.1f}s. See log: {log_path}")
+            else:
+                self.report({'INFO'}, f"Designer baking complete in {duration:.1f}s → {bake_tex}")
 
         # Attempt to switch active 3D View(s) to Material Preview and Diffuse Color pass
         # (Safe no-op in background/headless mode or if properties unavailable.)

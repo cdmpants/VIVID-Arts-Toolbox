@@ -24,17 +24,39 @@ class VIVID_PT_setup_lods(Panel):
         box.label(text="LOD Setup Settings", icon='OUTLINER_OB_MESH')
         s = getattr(context.scene, "vivid_lod_props", None)
         if s:
-            box.prop(s, "generate_shadow_proxies")
+            # Collider options and ratio
             row = box.row(align=True)
             row.prop(s, "generate_collider")
-            row.prop(s, "is_convex_collider")
+            row = box.row(align=True)
+            row.prop(s, "collider_ratio", text="MeshCollider Ratio")
+            # LOD target ratios
+            col = box.column(align=True)
+            col.prop(s, "lod0_ratio", text="LOD0 Ratio")
+            col.prop(s, "lod1_ratio", text="LOD1 Ratio")
+            col.prop(s, "lod2_ratio", text="LOD2 Ratio")
+            col.prop(s, "lod3_ratio", text="LOD3 Ratio")
+            # ShadowProxy toggle and per-LOD ratios (vertical)
+            box.prop(s, "generate_shadow_proxies")
+            sp_box = box.box()
+            sp_box.label(text="ShadowProxy Ratios")
+            sp_col = sp_box.column(align=True)
+            sp_col.prop(s, "sp_lod0_ratio", text="SP LOD0")
+            sp_col.prop(s, "sp_lod1_ratio", text="SP LOD1")
+            sp_col.prop(s, "sp_lod2_ratio", text="SP LOD2")
+            sp_col.prop(s, "sp_lod3_ratio", text="SP LOD3")
         else:
             box.label(text="Scene LOD properties not found (scene.vivid_lod_props).", icon='INFO')
         col = layout.column(align=True)
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "setup_lods"):
-            col.operator("vivid.setup_lods", text="Setup LODs", icon='MOD_DECIM')
+            col.operator("vivid.setup_lods", text="Generate LODs", icon='MOD_DECIM')
         else:
             col.label(text="Operator vivid.setup_lods not registered.", icon='ERROR')
+
+        col = layout.column(align=True)
+        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "export_lods"):
+            col.operator("vivid.export_lods", text="Export LODs", icon='EXPORT')
+        else:
+            col.label(text="Operator vivid.export_lods not registered.", icon='ERROR')
 
 class VIEW3D_PT_shadowproxy_correction(Panel):
     bl_space_type='VIEW_3D'

@@ -82,11 +82,15 @@ def _pack_into_udims(obj, udim_count: int, margin_norm: float):
             for c in range(cols):
                 tile_coords.append((c, r))
         tile_coords = tile_coords[:udim_count]
-        poly_tile = []  # list of (poly, (tu,tv))
+        poly_tile = []  # list of (loop_indices_list, (tu,tv))
         for poly in polys:
             if tile_index >= udim_count:
                 tile_index = udim_count - 1
-            poly_tile.append((poly, tile_coords[tile_index]))
+            try:
+                li_list = list(poly.loop_indices)
+            except Exception:
+                li_list = []
+            poly_tile.append((li_list, tile_coords[tile_index]))
             assigned += 1
             if assigned >= per_tile:
                 tile_index += 1
@@ -97,10 +101,10 @@ def _pack_into_udims(obj, udim_count: int, margin_norm: float):
                 bpy.ops.object.mode_set(mode=prev)
         except Exception:
             pass
-    # Now write UV coordinates in OBJECT mode to avoid index errors on uv.data
-    for poly, (tu, tv) in poly_tile:
-        for li in poly.loop_indices:
-            if li < len(uv.data):
+    # Now write UV coordinates in OBJECT mode using captured loop indices
+    for li_list, (tu, tv) in poly_tile:
+        for li in li_list:
+            if 0 <= li < len(uv.data):
                 luv = uv.data[li].uv
                 luv.x = (luv.x % 1.0) + tu
                 luv.y = (luv.y % 1.0) + tv

@@ -5,7 +5,7 @@ import tempfile
 import sys # Import sys to get the executable path of the current Blender instance
 
 
-def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count):
+def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count, ratios=None):
     """
     Generates LODs using meshlabserver.
     Requires MeshLab Server to be installed and path configured in preferences.
@@ -24,19 +24,25 @@ def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_
         operator.report({'ERROR'}, f"MeshLab Server not found at: {meshlab_server_path}. Please set the correct path in addon preferences.")
         return False
 
-    # Define target face counts based on initial_face_count
-    lod_targets = {
-        1: max(100, int(initial_face_count * 0.40)), # LOD1: 40% of initial, min 100 faces
-        2: max(50, int(initial_face_count * 0.16)),  # LOD2: 16% of initial, min 50 faces
-        3: max(20, int(initial_face_count * 0.064))  # LOD3: 6.4% of initial, min 20 faces
-    }
+    # Define target face counts based on initial_face_count, including optional LOD0
+    default_r = {0: 0.08, 1: 0.40, 2: 0.16, 3: 0.064}
+    r = ratios or {1: 0.40, 2: 0.16, 3: 0.064}
+    # Ensure all 0..3 keys have a value (fallback to defaults)
+    r_full = {i: float(r.get(i, default_r[i])) for i in (0, 1, 2, 3)}
+    lod_targets = {i: max(10, int(initial_face_count * r_full[i])) for i in (0, 1, 2, 3)}
 
-    base_name = lod0_obj.name.replace("_LOD0", "") # Assuming LOD0 is the naming convention
+    # Derive base name from input; if input is Cinema or variant, we will name outputs {base}_LOD{i}
+    name = lod0_obj.name
+    if name.endswith('_Cinema'):
+        base_name = name.replace('_Cinema', '')
+    else:
+        base_name = name.replace('_LOD0', '')
 
     temp_filter_file = None
     try:
-        for i in range(1, 4):
-            target_face_count = lod_targets[i]
+        # Produce LOD0..LOD3
+        for i in (0, 1, 2, 3):
+            target_face_count = lod_targets.get(i, max(10, int(initial_face_count * 0.1)))
             output_lod_name = f"{base_name}_LOD{i}.dae"
             output_filepath = os.path.join(lods_dir, output_lod_name)
 
@@ -88,7 +94,7 @@ def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_
             os.remove(temp_filter_file.name)
 
 
-def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count):
+def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count, ratios=None):
     """Helper function to encapsulate PyMeshLab logic."""
     try:
         import pymeshlab as ml
@@ -108,18 +114,24 @@ def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj,
         context.report({'ERROR'}, "LOD0 has no faces. Cannot generate LODs.")
         return False
 
+    # Include LOD0; fall back to sensible defaults if not provided
     lod_target_percentages = {
-        'LOD1': 0.4,
-        'LOD2': 0.16,
-        'LOD3': 0.064
+        'LOD0': (ratios.get(0) if ratios else 0.08),
+        'LOD1': (ratios.get(1) if ratios else 0.4),
+        'LOD2': (ratios.get(2) if ratios else 0.16),
+        'LOD3': (ratios.get(3) if ratios else 0.064)
     }
 
-    original_base_name = lod0_obj.name.replace("_LOD0", "")
+    name = lod0_obj.name
+    if name.endswith('_Cinema'):
+        original_base_name = name.replace('_Cinema', '')
+    else:
+        original_base_name = name.replace('_LOD0', '')
 
     try:
         ms.set_current_mesh(0)
 
-        for i in range(1, 4):
+        for i in [0, 1, 2, 3]:
             lod_suffix = f"_LOD{i}"
             output_filename = f"{original_base_name}{lod_suffix}.dae"
             output_filepath = os.path.join(lods_dir, output_filename)
@@ -138,7 +150,8 @@ def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj,
                 planarquadric=False,
                 selected=False
             )
-            ms.save_current_current_mesh(output_filepath)
+            # Save current mesh to output
+            ms.save_current_mesh(output_filepath)
 
             context.report({'INFO'}, f"Generated {output_filename} with target faces: {target_faces}")
 

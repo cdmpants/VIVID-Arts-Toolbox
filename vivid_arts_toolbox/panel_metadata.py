@@ -34,14 +34,22 @@ class VIVID_PT_metadata(Panel):
         layout = self.layout
         s = getattr(context.scene, 'vivid_metadata', None)
         col = layout.column(align=True)
-        col.operator("vivid.export_metadata_json", text="Export Metadata JSON", icon='EXPORT')
+        col.operator("vivid.export_metadata_json", text="Export JSONs", icon='EXPORT')
         row = layout.row(align=True)
-        row.operator("vivid.reload_local_json", text="Reload Local JSON", icon='FILE_REFRESH')
+        row.operator("vivid.reload_local_json", text="Reload Local JSONs", icon='FILE_REFRESH')
         sub = layout.column(align=True)
         sub.prop(context.scene, "vivid_metadata_reference_path", text="Reference JSON")
-        sub.operator("vivid.load_reference_json", text="Load Reference JSON", icon='FILE_FOLDER')
+        sub.operator("vivid.load_reference_json", text="Load Reference Metadata JSON", icon='FILE_FOLDER')
         layout.separator()
         if s:
+            # Initialize section above Main
+            init_box = layout.box(); init_box.label(text="Initialize", icon='SETTINGS')
+            init_col = init_box.column(align=True)
+            init_col.prop(s, 'auto_exposure')
+            init_col.prop(s, 'auto_white_balance')
+            init_col.prop(s, 'max_realityscan_textures')
+            init_col.prop(s, 'cinema_polycount_target')
+
             box = layout.box(); box.label(text="Main", icon='INFO')
             col = box.column(align=True)
             row = col.row(align=True)

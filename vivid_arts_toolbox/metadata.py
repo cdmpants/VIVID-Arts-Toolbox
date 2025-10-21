@@ -6,10 +6,45 @@ from bpy.props import (
     PointerProperty,
     CollectionProperty,
     IntProperty,
+    BoolProperty,
 )
 
 def _blend_dir():
     return bpy.path.abspath("//")
+def _release_mirror_dir(context):
+    # Build Release sibling path mirrored from Production
+    try:
+        prefs = context.preferences.addons[__package__.split('.')[0]].preferences
+        release_root = getattr(prefs, 'release_directory', '') or ''
+    except Exception:
+        release_root = ''
+    blend_dir = _blend_dir()
+    parts = os.path.normpath(blend_dir).split(os.sep)
+    lower = [p.lower() for p in parts]
+    if 'production' in lower:
+        idx = lower.index('production')
+        sub_after = parts[idx + 1:]
+        if release_root:
+            return os.path.join(release_root, *sub_after)
+        parts[idx] = 'Release'
+        return os.path.join(*parts)
+    if release_root:
+        return os.path.join(release_root, os.path.basename(os.path.normpath(blend_dir)))
+    # Fallback sibling
+    return os.path.join(os.path.dirname(os.path.normpath(blend_dir)), 'Release', os.path.basename(os.path.normpath(blend_dir)))
+
+def _count_model_variants():
+    # Count Cinema variants: Cinema_Var1, Cinema_Var2, ...; base Cinema does not count
+    n = 0
+    for c in bpy.data.collections:
+        name = c.name
+        if name.startswith('Cinema_Var'):
+            try:
+                int(name.replace('Cinema_Var',''))
+                n += 1
+            except Exception:
+                continue
+    return n
 
 def _blend_basename_noext():
     p = bpy.data.filepath
@@ -108,7 +143,7 @@ def _collect_dimensions(context, asset_type: str):
 
 class VIVID_OT_export_metadata_json(Operator):
     bl_idname = "vivid.export_metadata_json"
-    bl_label = "Export Metadata JSON"
+    bl_label = "Export JSONs"
 
     def execute(self, context):
         s = getattr(context.scene, 'vivid_metadata', None)
@@ -120,6 +155,7 @@ class VIVID_OT_export_metadata_json(Operator):
         out_path = os.path.join(out_dir, f"{base}_meta.json")
 
         now = datetime.datetime.now().strftime('%Y-%m-%d')
+        variant_count = _count_model_variants()
         data = {
             "Main": {
                 "AssetID": s.asset_id or base,
@@ -135,6 +171,7 @@ class VIVID_OT_export_metadata_json(Operator):
                 "Date Captured": s.date_captured or "Unknown",
                 "Last Updated": now,
                 "Version": s.version or "1.0",
+                "Model Variants": int(variant_count),
             },
             "Polycounts": {
                 "Cinema": s.poly_cinema or None,
@@ -158,28 +195,52 @@ class VIVID_OT_export_metadata_json(Operator):
             # "Textures": to be filled later
         }
 
+        # Prepare Initialize JSON (separate file, local only)
+        init = {
+            "Initialize": {
+                "Auto Exposure": bool(getattr(s, 'auto_exposure', True)),
+                "Auto White Balance": bool(getattr(s, 'auto_white_balance', True)),
+                "Max RealityScan Textures": int(getattr(s, 'max_realityscan_textures', 16)),
+                "Cinema Polycount Target": int(getattr(s, 'cinema_polycount_target', 2000000)),
+            }
+        }
+        init_name_id = (s.asset_id or base).strip() or base
+        init_out_path = os.path.join(out_dir, f"{init_name_id}_Initialize.json")
+
         try:
+            # Write Metadata next to blend
             with open(out_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
+            # Also write to Release mirror for Metadata only
+            rel_dir = _release_mirror_dir(context)
+            os.makedirs(rel_dir, exist_ok=True)
+            rel_path = os.path.join(rel_dir, f"{base}_meta.json")
+            with open(rel_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            # Write Initialize JSON locally only
+            with open(init_out_path, 'w', encoding='utf-8') as f:
+                json.dump(init, f, indent=2)
         except Exception as e:
-            self.report({'ERROR'}, f'Failed to write JSON: {e}')
+            self.report({'ERROR'}, f'Failed to write JSONs: {e}')
             return {'CANCELLED'}
-        self.report({'INFO'}, f'Exported metadata: {out_path}')
+        self.report({'INFO'}, f'Exported: {out_path} and {init_out_path}')
         return {'FINISHED'}
 
 
 class VIVID_OT_reload_local_json(Operator):
     bl_idname = "vivid.reload_local_json"
-    bl_label = "Reload Local JSON"
+    bl_label = "Reload Local JSONs"
 
     def execute(self, context):
         base = _blend_basename_noext()
-        in_path = os.path.join(_blend_dir(), f"{base}_meta.json")
+        in_dir = _blend_dir()
+        meta_path = os.path.join(in_dir, f"{base}_meta.json")
+        init_data = None
         try:
-            with open(in_path, 'r', encoding='utf-8') as f:
+            with open(meta_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         except Exception as e:
-            self.report({'ERROR'}, f'Failed to read JSON: {e}')
+            self.report({'ERROR'}, f'Failed to read Metadata JSON: {e}')
             return {'CANCELLED'}
         s = getattr(context.scene, 'vivid_metadata', None)
         if not s:
@@ -209,10 +270,16 @@ class VIVID_OT_reload_local_json(Operator):
             s.capture_device = sc.get('Capture Device', 'Nikon D5500')
             s.source_notes = sc.get('Notes', '')
             imp = data.get('Importer', {})
-            s.importer_allow_udim_merge = 'True' if imp.get('Allow UDIM Merge', 'True') == True or imp.get('Allow UDIM Merge', 'True') == 'True' else 'False'
-            s.importer_allow_tessellation = 'True' if imp.get('Allow Tessellation', 'True') == True or imp.get('Allow Tessellation', 'True') == 'True' else 'False'
-            s.importer_has_collision = 'True' if imp.get('Has Collision', 'True') == True or imp.get('Has Collision', 'True') == 'True' else 'False'
-            s.importer_static = 'True' if imp.get('Static', 'True') == True or imp.get('Static', 'True') == 'True' else 'False'
+            def _to_bool(v, default=True):
+                if isinstance(v, bool):
+                    return v
+                if isinstance(v, str):
+                    return v.strip().lower() == 'true'
+                return default
+            s.importer_allow_udim_merge = _to_bool(imp.get('Allow UDIM Merge', True), True)
+            s.importer_allow_tessellation = _to_bool(imp.get('Allow Tessellation', True), True)
+            s.importer_has_collision = _to_bool(imp.get('Has Collision', True), True)
+            s.importer_static = _to_bool(imp.get('Static', True), True)
             lbls = data.get('Labels', [])
             # Populate both the collection and the legacy string for compatibility
             try:
@@ -226,13 +293,35 @@ class VIVID_OT_reload_local_json(Operator):
         except Exception as e:
             self.report({'ERROR'}, f'Failed to load into UI: {e}')
             return {'CANCELLED'}
-        self.report({'INFO'}, 'Reloaded metadata from local JSON')
+
+        # Load Initialize JSON after Metadata (uses AssetID for filename if available)
+        try:
+            init_name_id = (s.asset_id or base).strip() or base
+            init_path = os.path.join(in_dir, f"{init_name_id}_Initialize.json")
+            if os.path.exists(init_path):
+                with open(init_path, 'r', encoding='utf-8') as f:
+                    init_data = json.load(f)
+                init = init_data.get('Initialize', init_data)
+                s.auto_exposure = _to_bool(init.get('Auto Exposure', getattr(s, 'auto_exposure', True)), True)
+                s.auto_white_balance = _to_bool(init.get('Auto White Balance', getattr(s, 'auto_white_balance', True)), True)
+                try:
+                    s.max_realityscan_textures = int(init.get('Max RealityScan Textures', getattr(s, 'max_realityscan_textures', 16)))
+                except Exception:
+                    pass
+                try:
+                    s.cinema_polycount_target = int(init.get('Cinema Polycount Target', getattr(s, 'cinema_polycount_target', 2000000)))
+                except Exception:
+                    pass
+        except Exception as e:
+            self.report({'WARNING'}, f'Failed to read Initialize JSON: {e}')
+
+        self.report({'INFO'}, 'Reloaded local JSONs')
         return {'FINISHED'}
 
 
 class VIVID_OT_load_reference_json(Operator):
     bl_idname = "vivid.load_reference_json"
-    bl_label = "Load Reference JSON"
+    bl_label = "Load Reference Metadata JSON"
 
     def execute(self, context):
         p = getattr(context.scene, 'vivid_metadata_reference_path', '')
@@ -265,12 +354,17 @@ class VIVID_OT_load_reference_json(Operator):
             s.capture_device = sc.get('Capture Device', s.capture_device)
             s.source_notes = sc.get('Notes', s.source_notes)
             imp = data.get('Importer', {})
-            def coerce_tf(val, cur):
-                return 'True' if (val == True or val == 'True') else ('False' if (val == False or val == 'False') else cur)
-            s.importer_allow_udim_merge = coerce_tf(imp.get('Allow UDIM Merge', s.importer_allow_udim_merge), s.importer_allow_udim_merge)
-            s.importer_allow_tessellation = coerce_tf(imp.get('Allow Tessellation', s.importer_allow_tessellation), s.importer_allow_tessellation)
-            s.importer_has_collision = coerce_tf(imp.get('Has Collision', s.importer_has_collision), s.importer_has_collision)
-            s.importer_static = coerce_tf(imp.get('Static', s.importer_static), s.importer_static)
+            def coerce_bool(val, cur):
+                if isinstance(val, bool):
+                    return val
+                if isinstance(val, str):
+                    if val.strip().lower() in ('true','false'):
+                        return val.strip().lower() == 'true'
+                return cur
+            s.importer_allow_udim_merge = coerce_bool(imp.get('Allow UDIM Merge', s.importer_allow_udim_merge), s.importer_allow_udim_merge)
+            s.importer_allow_tessellation = coerce_bool(imp.get('Allow Tessellation', s.importer_allow_tessellation), s.importer_allow_tessellation)
+            s.importer_has_collision = coerce_bool(imp.get('Has Collision', s.importer_has_collision), s.importer_has_collision)
+            s.importer_static = coerce_bool(imp.get('Static', s.importer_static), s.importer_static)
             lbls = data.get('Labels', [])
             if isinstance(lbls, list):
                 try:
@@ -330,10 +424,17 @@ def register():
     VIVID_Metadata.capture_device = EnumProperty(name="Capture Device", items=_items_from('CaptureDevice', ['Nikon D5500','DJI Air 3']), default=_OPTIONS.get('CaptureDevice', ['DJI Air 3'])[0] if _OPTIONS.get('CaptureDevice') else 'DJI Air 3')
     VIVID_Metadata.source_notes = StringProperty(name="Notes")
 
-    VIVID_Metadata.importer_allow_udim_merge = EnumProperty(name="Allow UDIM Merge", items=[('True','True',''),('False','False','')], default='True')
-    VIVID_Metadata.importer_allow_tessellation = EnumProperty(name="Allow Tessellation", items=[('True','True',''),('False','False','')], default='True')
-    VIVID_Metadata.importer_has_collision = EnumProperty(name="Has Collision", items=[('True','True',''),('False','False','')], default='True')
-    VIVID_Metadata.importer_static = EnumProperty(name="Static", items=[('True','True',''),('False','False','')], default='True')
+    # Importer booleans (tickboxes)
+    VIVID_Metadata.importer_allow_udim_merge = BoolProperty(name="Allow UDIM Merge", default=True)
+    VIVID_Metadata.importer_allow_tessellation = BoolProperty(name="Allow Tessellation", default=True)
+    VIVID_Metadata.importer_has_collision = BoolProperty(name="Has Collision", default=True)
+    VIVID_Metadata.importer_static = BoolProperty(name="Static", default=True)
+
+    # Initialize section properties
+    VIVID_Metadata.auto_exposure = BoolProperty(name="Auto Exposure", default=True)
+    VIVID_Metadata.auto_white_balance = BoolProperty(name="Auto White Balance", default=True)
+    VIVID_Metadata.max_realityscan_textures = IntProperty(name="Max RealityScan Textures", default=16, min=1, max=64)
+    VIVID_Metadata.cinema_polycount_target = IntProperty(name="Cinema Polycount Target", default=2000000, min=0, soft_max=10000000)
 
     # Labels: new collection-based UI; keep legacy string for backward compatibility/older JSONs
     VIVID_Metadata.labels = StringProperty(name="Labels", description="Comma-separated labels (legacy)")

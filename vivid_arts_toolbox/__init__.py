@@ -25,6 +25,8 @@ from .operators.generate_asset import VIVID_OT_generate_asset
 from .operators.setup_lods import VIVID_OT_setup_lods
 from .operators.export_asset import VIVID_OT_export_asset
 from .operators.warning_dialog import VIVID_OT_warning_dialog
+from .operators.create_cinema_variant import VIVID_OT_create_cinema_variant
+from .operators.export_lods import VIVID_OT_export_lods
 
 # Modules with their own register() functions
 from .operators import shadowproxy_correction
@@ -39,10 +41,13 @@ from . import metadata
 _classes = (
     preferences.VIVID_Arts_Toolbox_Preferences,
     properties.VIVID_PG_BakeProperties,
+    properties.VIVID_PG_LODProperties,
     VIVID_OT_warning_dialog,
     VIVID_OT_generate_asset,
     VIVID_OT_setup_lods,
     VIVID_OT_export_asset,
+    VIVID_OT_create_cinema_variant,
+    VIVID_OT_export_lods,
 )
 
 def register():
@@ -51,7 +56,7 @@ def register():
         bpy.utils.register_class(cls)
 
     # Scene pointers & flags used across operators/panels
-    bpy.types.Scene.vivid_lod_props = PointerProperty(type=properties.VIVID_PG_BakeProperties)
+    bpy.types.Scene.vivid_lod_props = PointerProperty(type=properties.VIVID_PG_LODProperties)
     if not hasattr(bpy.types.Scene, "vivid_surface_margin"):
         from bpy.props import FloatProperty
         bpy.types.Scene.vivid_surface_margin = FloatProperty(

@@ -3,19 +3,18 @@ import os
 
 class VIVID_OT_generate_asset(bpy.types.Operator):
     bl_idname = "vivid.generate_asset"
-    bl_label = "Generate Asset"
-    bl_description = "Duplicates the Optimized mesh and prepares it as LOD0 for asset generation."
+    bl_label = "Generate Cinema Model"
+    bl_description = "Creates a 'Cinema' collection and duplicates the _Optimized mesh as _Cinema."
 
     def execute(self, context):
-        self.report({'INFO'}, "Starting Generate Asset process...")
-
+        self.report({'INFO'}, "Starting Generate Cinema Model process...")
         optimized_collection = bpy.data.collections.get("Optimized")
-        asset_collection = bpy.data.collections.get("Asset")
+        cinema_collection = bpy.data.collections.get("Cinema")
 
-        if not asset_collection:
-            asset_collection = bpy.data.collections.new("Asset")
-            bpy.context.scene.collection.children.link(asset_collection)
-            self.report({'INFO'}, "Created new collection: 'Asset'.")
+        if not cinema_collection:
+            cinema_collection = bpy.data.collections.new("Cinema")
+            bpy.context.scene.collection.children.link(cinema_collection)
+            self.report({'INFO'}, "Created new collection: 'Cinema'.")
 
         optimized_mesh_obj = None
         cage_mesh_obj = None
@@ -82,8 +81,8 @@ class VIVID_OT_generate_asset(bpy.types.Operator):
             self.report({'WARNING'}, "No '_HighPoly' object found. The BaseColor_Transfer_DLBC baker might not work as expected without it.")
             high_poly_texture_path = "" # Ensure it's an empty string if not found
 
-        # Duplicate and rename the Optimized mesh to LOD0
-        self.report({'INFO'}, "Duplicating Optimized mesh to _LOD0 and moving to Asset collection (no FBX export)...")
+        # Duplicate and rename the Optimized mesh to _Cinema
+        self.report({'INFO'}, "Duplicating Optimized mesh to _Cinema and moving to Cinema collection...")
 
         bpy.ops.object.select_all(action='DESELECT')
         optimized_mesh_obj.select_set(True)
@@ -92,17 +91,17 @@ class VIVID_OT_generate_asset(bpy.types.Operator):
         bpy.ops.object.duplicate_move()  # Duplicate the selected object
         lod0_obj = context.active_object  # The duplicated object becomes the active object
 
-        new_name = optimized_mesh_obj.name.replace("_Optimized", "_LOD0")
+        new_name = optimized_mesh_obj.name.replace("_Optimized", "_Cinema")
         lod0_obj.name = new_name  # Rename the duplicated object
         lod0_obj.data.name = new_name  # Rename the mesh data block
 
-        # Link LOD0 to the Asset collection and unlink from other collections if necessary
+        # Link _Cinema to the Cinema collection and unlink from other collections if necessary
         if optimized_collection and lod0_obj.name in optimized_collection.objects:
-            optimized_collection.objects.unlink(lod0_obj)  # Unlink from 'Optimized' collection
-        if lod0_obj.name not in asset_collection.objects:
-            asset_collection.objects.link(lod0_obj)  # Ensure it's linked to 'Asset' collection
+            optimized_collection.objects.unlink(lod0_obj)
+        if lod0_obj.name not in cinema_collection.objects:
+            cinema_collection.objects.link(lod0_obj)
 
-        self.report({'INFO'}, f"Generated LOD0: {lod0_obj.name} in 'Asset' collection.")
-        self.report({'INFO'}, "Generate Asset process completed.")
+        self.report({'INFO'}, f"Generated Cinema mesh: {lod0_obj.name} in 'Cinema' collection.")
+        self.report({'INFO'}, "Generate Cinema Model process completed.")
         return {'FINISHED'}
 
