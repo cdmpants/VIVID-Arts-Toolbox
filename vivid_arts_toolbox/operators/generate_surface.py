@@ -55,6 +55,11 @@ class VIVID_OT_generate_surface(bpy.types.Operator):
         avg_n = Vector((0.0, 0.0, 1.0))
         if kd and nverts:
             M_n = world.to_3x3().inverted().transposed()
+            # Ensure bmesh lookup table is up-to-date for indexed access
+            try:
+                bm.verts.ensure_lookup_table()
+            except Exception:
+                pass
             hits = kd.find_range(cursor_loc, radius)
             if hits:
                 s = Vector((0,0,0))
