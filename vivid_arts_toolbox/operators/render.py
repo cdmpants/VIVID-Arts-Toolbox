@@ -44,6 +44,16 @@ def _find_camera(scene: bpy.types.Scene) -> bpy.types.Object | None:
     return None
 
 
+def _find_optimized_obj() -> bpy.types.Object | None:
+    o = bpy.context.active_object
+    if o and o.type == 'MESH' and o.name.endswith('_Optimized'):
+        return o
+    for t in bpy.context.scene.objects:
+        if t.type == 'MESH' and t.name.endswith('_Optimized'):
+            return t
+    return None
+
+
 def _set_camera_offsets(scene: bpy.types.Scene, z_angle_rad: float, x_angle_rad: float):
     co_z = scene.objects.get('CameraOffset_Z')
     co_x = scene.objects.get('CameraOffset_X')
@@ -172,8 +182,117 @@ class VIVID_OT_output_renders(Operator):
                 self.report({'ERROR'}, f"Render.blend not found in addon: {render_blend}")
                 return {'CANCELLED'}
 
-        # Choose scene name by biome (fallback Generic)
-        s = getattr(context.scene, 'vivid_metadata', None)
+        # Prepare output folder (Release/Renders)
+        try:
+            release_dir = _release_asset_dir(context)
+        except Exception as e:
+            self.report({'ERROR'}, str(e))
+            return {'CANCELLED'}
+        renders_dir = os.path.join(release_dir, 'Renders')
+        os.makedirs(renders_dir, exist_ok=True)
+
+        # Determine asset type from metadata
+        md = getattr(context.scene, 'vivid_metadata', None)
+        asset_type = getattr(md, 'asset_type', 'Model') if md else 'Model'
+
+        if asset_type == 'Surface':
+            # Surface flow: TextureBall and TexturePlane, no camera offsets or fitting
+            optimized = _find_optimized_obj()
+            mat = optimized.material_slots[0].material if (optimized and optimized.material_slots) else None
+            asset_id = getattr(md, 'asset_id', '') if md else ''
+            if not asset_id:
+                # fallback to folder name
+                blend_dir = os.path.dirname(bpy.data.filepath)
+                asset_id = os.path.basename(blend_dir)
+
+            def render_surface_scene(scene_name: str, suffix: str):
+                # Append requested scene
+                before = set(sc.name for sc in bpy.data.scenes)
+                chosen_name = None
+                try:
+                    with bpy.data.libraries.load(render_blend, link=False) as (data_from, data_to):
+                        names = list(data_from.scenes)
+                        if scene_name in names:
+                            data_to.scenes = [scene_name]
+                            chosen_name = scene_name
+                        else:
+                            raise RuntimeError(f"Scene '{scene_name}' not found in Render.blend")
+                except Exception as e:
+                    self.report({'ERROR'}, f"Failed to append {scene_name} scene: {e}")
+                    return False
+                after = {sc.name for sc in bpy.data.scenes}
+                new_names = list(after - before)
+                scn = bpy.data.scenes.get(chosen_name)
+                if not scn and new_names:
+                    scn = bpy.data.scenes.get(new_names[0])
+                if not scn:
+                    self.report({'ERROR'}, f"Appended {scene_name} scene not found")
+                    return False
+
+                prev_scene = context.window.scene
+                context.window.scene = scn
+
+                # Assign material to named object in the appended scene
+                obj = None
+                for o in scn.objects:
+                    if o.name == scene_name and o.type == 'MESH':
+                        obj = o
+                        break
+                if not obj:
+                    # fallback first mesh in scene
+                    for o in scn.objects:
+                        if o.type == 'MESH':
+                            obj = o
+                            break
+                if obj and mat:
+                    try:
+                        obj.data.materials.clear()
+                        obj.data.materials.append(mat)
+                    except Exception:
+                        pass
+
+                # Setup render output
+                orig_fp = scn.render.filepath
+                orig_fmt = scn.render.image_settings.file_format
+                orig_col = scn.render.image_settings.color_mode
+                orig_transp = scn.render.film_transparent
+                scn.render.image_settings.file_format = 'PNG'
+                scn.render.image_settings.color_mode = 'RGBA'
+                scn.render.film_transparent = True
+
+                out_path = os.path.join(renders_dir, f"{asset_id}_{suffix}.png")
+                try:
+                    scn.render.filepath = out_path
+                    bpy.ops.render.render(write_still=True)
+                finally:
+                    scn.render.filepath = orig_fp
+                    scn.render.image_settings.file_format = orig_fmt
+                    scn.render.image_settings.color_mode = orig_col
+                    scn.render.film_transparent = orig_transp
+                    try:
+                        context.window.scene = prev_scene
+                    except Exception:
+                        pass
+                    try:
+                        bpy.data.scenes.remove(scn, do_unlink=True)
+                    except Exception:
+                        pass
+                return True
+
+            ok1 = render_surface_scene('TextureBall', 'Ball_BeautyRender')
+            ok2 = render_surface_scene('TexturePlane', 'Plane_BeautyRender')
+
+            # Downscale release textures to 1024 JPG into Renders folder
+            self._downscale_release_textures_to_jpg(context, release_dir, renders_dir)
+
+            if not (ok1 and ok2):
+                return {'CANCELLED'}
+            self.report({'INFO'}, f"Surface renders saved to: {renders_dir}")
+            return {'FINISHED'}
+
+        # Model flow (existing), but save into Renders subfolder
+        # Choose biome scene (fallback to Generic)
+        s = md
         biome_name = getattr(s, 'biome', 'Generic') if s else 'Generic'
 
         # Append scene
@@ -191,7 +310,6 @@ class VIVID_OT_output_renders(Operator):
                     data_to.scenes = ['Generic']
                     chosen_name = 'Generic'
                 else:
-                    # Append first available if none match
                     data_to.scenes = [names[0]] if names else []
                     chosen_name = names[0] if names else None
         except Exception as e:
@@ -202,7 +320,6 @@ class VIVID_OT_output_renders(Operator):
             self.report({'ERROR'}, "No scenes found in Render.blend")
             return {'CANCELLED'}
 
-        # Resolve the newly appended scene (account for name suffix)
         after = {sc.name for sc in bpy.data.scenes}
         new_names = list(after - before)
         render_scene = bpy.data.scenes.get(chosen_name)
@@ -212,23 +329,13 @@ class VIVID_OT_output_renders(Operator):
             self.report({'ERROR'}, "Appended render scene not found")
             return {'CANCELLED'}
 
-        # Switch to appended scene
         prev_scene = context.window.scene
         context.window.scene = render_scene
 
-        # Set camera offsets from Scene sliders (stored in radians)
+        # Camera offsets
         z_angle = getattr(context.scene, 'vivid_camera_offset_z', 0.0)
         x_angle = getattr(context.scene, 'vivid_camera_offset_x', 0.0)
         _set_camera_offsets(render_scene, z_angle, x_angle)
-
-        # Prepare render settings
-        try:
-            out_dir = _release_asset_dir(context)
-        except Exception as e:
-            self.report({'ERROR'}, str(e))
-            context.window.scene = prev_scene
-            return {'CANCELLED'}
-        os.makedirs(out_dir, exist_ok=True)
 
         cam_obj = _find_camera(render_scene)
         if not cam_obj:
@@ -236,14 +343,13 @@ class VIVID_OT_output_renders(Operator):
             context.window.scene = prev_scene
             return {'CANCELLED'}
 
-        # Gather Cinema and variants
         targets = _collect_cinema_targets()
         if not targets:
             self.report({'ERROR'}, "No Cinema or variant meshes found.")
             context.window.scene = prev_scene
             return {'CANCELLED'}
 
-        # Base render config
+        # Render settings
         orig_fp = render_scene.render.filepath
         orig_fmt = render_scene.render.image_settings.file_format
         orig_col = render_scene.render.image_settings.color_mode
@@ -258,37 +364,29 @@ class VIVID_OT_output_renders(Operator):
 
         try:
             for obj in targets:
-                # Link Cinema/variant into render scene
                 if obj.name not in render_scene.collection.objects:
                     try:
                         render_scene.collection.objects.link(obj)
                     except RuntimeError:
-                        pass  # already linked elsewhere
-
-                # Align camera once per Cinema/variant
+                        pass
                 _fit_camera_to_object(render_scene, cam_obj, obj, margin=1.08)
 
-                # Base name without suffixes
                 base = obj.name
                 if base.endswith('_Cinema'):
                     base = base[:-7]
                 base = base.replace('_Cinema_Var', '_Var')
 
-                # Beauty
                 _set_switch_for_object(obj, 'Switch_Clay', 0.0)
-                out_path = os.path.join(out_dir, f"{base}_BeautyRender.png")
+                out_path = os.path.join(renders_dir, f"{base}_BeautyRender.png")
                 do_render(out_path)
 
-                # Clay
                 _set_switch_for_object(obj, 'Switch_Clay', 1.0)
-                out_path = os.path.join(out_dir, f"{base}_ClayRender.png")
+                out_path = os.path.join(renders_dir, f"{base}_ClayRender.png")
                 do_render(out_path)
                 _set_switch_for_object(obj, 'Switch_Clay', 0.0)
 
-                # Wireframe: swap to LOD0 corresponding
                 lod0_name = _lod0_name_for(obj.name)
                 lod0 = bpy.data.objects.get(lod0_name)
-                # Remove Cinema from scene for wireframe view
                 try:
                     if obj.name in render_scene.collection.objects:
                         render_scene.collection.objects.unlink(obj)
@@ -301,31 +399,25 @@ class VIVID_OT_output_renders(Operator):
                         except RuntimeError:
                             pass
                     _set_switch_for_object(lod0, 'Switch_Wireframe', 1.0)
-                    out_path = os.path.join(out_dir, f"{base}_WireframeRender.png")
+                    out_path = os.path.join(renders_dir, f"{base}_WireframeRender.png")
                     do_render(out_path)
                     _set_switch_for_object(lod0, 'Switch_Wireframe', 0.0)
-                    # Unlink LOD0 after
                     try:
                         render_scene.collection.objects.unlink(lod0)
                     except Exception:
                         pass
-                # Relink Cinema for next steps and cleanup
                 try:
                     if obj.name not in render_scene.collection.objects:
                         render_scene.collection.objects.link(obj)
-                    # Remove it so next variant starts clean
                     render_scene.collection.objects.unlink(obj)
                 except Exception:
                     pass
 
         finally:
-            # Restore render settings
             render_scene.render.filepath = orig_fp
             render_scene.render.image_settings.file_format = orig_fmt
             render_scene.render.image_settings.color_mode = orig_col
             render_scene.render.film_transparent = orig_transp
-
-            # Restore previous scene and remove appended
             try:
                 context.window.scene = prev_scene
             except Exception:
@@ -335,8 +427,54 @@ class VIVID_OT_output_renders(Operator):
             except Exception:
                 pass
 
-        self.report({'INFO'}, f"Renders saved to: {out_dir}")
+        # Downscale release textures to 1024 JPG into Renders folder (best-effort)
+        self._downscale_release_textures_to_jpg(context, release_dir, renders_dir)
+
+        self.report({'INFO'}, f"Renders saved to: {renders_dir}")
         return {'FINISHED'}
+
+    def _downscale_release_textures_to_jpg(self, context, release_dir: str, renders_dir: str):
+        # Best-effort: iterate images in release root (non-recursive), scale to 1024x1024 and save as JPG in Renders
+        exts = {'.png', '.tga', '.tif', '.tiff', '.exr', '.jpg', '.jpeg'}
+        files = []
+        try:
+            files = [f for f in os.listdir(release_dir) if os.path.splitext(f)[1].lower() in exts]
+        except Exception:
+            return
+        if not files:
+            return
+        scene = context.scene
+        # Save original settings
+        orig_fmt = scene.render.image_settings.file_format
+        orig_col = scene.render.image_settings.color_mode
+        orig_fp = scene.render.filepath
+        try:
+            scene.render.image_settings.file_format = 'JPEG'
+            scene.render.image_settings.color_mode = 'RGB'
+            for f in files:
+                src_path = os.path.join(release_dir, f)
+                stem, _ = os.path.splitext(f)
+                dst_path = os.path.join(renders_dir, f"{stem}_1024.jpg")
+                try:
+                    img = bpy.data.images.load(src_path, check_existing=True)
+                except Exception:
+                    continue
+                try:
+                    # Ensure loaded
+                    if img.size[0] != 0 and img.size[1] != 0:
+                        img.scale(1024, 1024)
+                    img.save_render(dst_path, scene=scene)
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        bpy.data.images.remove(img, do_unlink=True)
+                    except Exception:
+                        pass
+        finally:
+            scene.render.image_settings.file_format = orig_fmt
+            scene.render.image_settings.color_mode = orig_col
+            scene.render.filepath = orig_fp
 
 
 def register():

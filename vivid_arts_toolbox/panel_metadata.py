@@ -56,8 +56,11 @@ class VIVID_PT_metadata(Panel):
                 subtype='ANGLE',
                 default=-0.43633231299,  # -25 degrees in radians
             )
-        sub.prop(context.scene, "vivid_camera_offset_z")
-        sub.prop(context.scene, "vivid_camera_offset_x")
+        # Hide camera offset sliders when Asset Type is Surface (Surface flow does not use offsets)
+        s = getattr(context.scene, 'vivid_metadata', None)
+        if not s or getattr(s, 'asset_type', 'Model') != 'Surface':
+            sub.prop(context.scene, "vivid_camera_offset_z")
+            sub.prop(context.scene, "vivid_camera_offset_x")
         sub.operator("vivid.output_renders", text="Output Renders", icon='RENDER_STILL')
         layout.separator()
         if s:
