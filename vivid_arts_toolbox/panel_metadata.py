@@ -40,6 +40,25 @@ class VIVID_PT_metadata(Panel):
         sub = layout.column(align=True)
         sub.prop(context.scene, "vivid_metadata_reference_path", text="Reference JSON")
         sub.operator("vivid.load_reference_json", text="Load Reference Metadata JSON", icon='FILE_FOLDER')
+        # Camera Offsets + Output Renders controls
+        from bpy.props import FloatProperty
+        if not hasattr(bpy.types.Scene, "vivid_camera_offset_z"):
+            bpy.types.Scene.vivid_camera_offset_z = FloatProperty(
+                name="Camera Offset Z",
+                description="Rotation Z applied to CameraOffset_Z in the appended render scene",
+                subtype='ANGLE',
+                default=0.78539816339,  # 45 degrees in radians
+            )
+        if not hasattr(bpy.types.Scene, "vivid_camera_offset_x"):
+            bpy.types.Scene.vivid_camera_offset_x = FloatProperty(
+                name="Camera Offset X",
+                description="Rotation X applied to CameraOffset_X in the appended render scene",
+                subtype='ANGLE',
+                default=-0.43633231299,  # -25 degrees in radians
+            )
+        sub.prop(context.scene, "vivid_camera_offset_z")
+        sub.prop(context.scene, "vivid_camera_offset_x")
+        sub.operator("vivid.output_renders", text="Output Renders", icon='RENDER_STILL')
         layout.separator()
         if s:
             # Initialize section above Main
