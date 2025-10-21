@@ -5,7 +5,7 @@ from bpy.types import Panel
 class VIVID_PT_main_panel_lods(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category   = "LODs"
+    bl_category   = "LOD"
     bl_label      = "VIVID Arts Toolbox"
     bl_options    = {'HIDE_HEADER'}
     def draw(self, context):
@@ -14,7 +14,7 @@ class VIVID_PT_main_panel_lods(Panel):
 class VIVID_PT_setup_lods(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category   = "LODs"
+    bl_category   = "LOD"
     bl_parent_id  = "VIVID_PT_main_panel_lods"
     bl_label      = "Generate LODs"
     bl_order      = 30
@@ -24,6 +24,8 @@ class VIVID_PT_setup_lods(Panel):
         box.label(text="LOD Setup Settings", icon='OUTLINER_OB_MESH')
         s = getattr(context.scene, "vivid_lod_props", None)
         if s:
+            # Custom LODs toggle
+            box.prop(s, "custom_lods")
             # Collider options and ratio
             row = box.row(align=True)
             row.prop(s, "generate_collider")
@@ -48,7 +50,9 @@ class VIVID_PT_setup_lods(Panel):
             box.label(text="Scene LOD properties not found (scene.vivid_lod_props).", icon='INFO')
         col = layout.column(align=True)
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "setup_lods"):
-            col.operator("vivid.setup_lods", text="Generate LODs", icon='MOD_DECIM')
+            row = col.row(align=True)
+            row.enabled = not getattr(getattr(context.scene, 'vivid_lod_props', None), 'custom_lods', False)
+            row.operator("vivid.setup_lods", text="Generate LODs", icon='MOD_DECIM')
         else:
             col.label(text="Operator vivid.setup_lods not registered.", icon='ERROR')
 
@@ -61,7 +65,7 @@ class VIVID_PT_setup_lods(Panel):
 class VIEW3D_PT_shadowproxy_correction(Panel):
     bl_space_type='VIEW_3D'
     bl_region_type='UI'
-    bl_category  = "LODs"
+    bl_category  = "LOD"
     bl_parent_id = "VIVID_PT_main_panel_lods"
     bl_label     = "ShadowProxy Correction"
     bl_order     = 40
@@ -75,7 +79,7 @@ class VIEW3D_PT_shadowproxy_correction(Panel):
         row.prop(s,"sp_passes")
         row.prop(s,"sp_v_passes")
         box.prop(s,"sp_max_push")
-        row=box.row(align=True); row.prop(s,"sp_token_lod"); row.prop(s,"sp_token_proxy")
+    # LOD/Proxy tokens are hardcoded now
         layout.separator()
         col=layout.column(align=True)
         op=col.operator("object.shadowproxy_fit_all_pairs",text="Fit Shadow Proxies",icon='MOD_SHRINKWRAP')
@@ -83,7 +87,7 @@ class VIEW3D_PT_shadowproxy_correction(Panel):
         op.passes=s.sp_passes; op.v_passes=s.sp_v_passes; op.max_push=s.sp_max_push
         op.only_selected=s.sp_only_selected_pairs
         col.prop(s,"sp_only_selected_pairs")
-        col.operator("object.shadowproxy_list_pairs",text="List Pairs",icon='INFO')
+    # Removed List Pairs button
         layout.separator()
         box2 = layout.box(); box2.label(text="LOD Textures", icon='RENDER_STILL')
         box2.label(text="Bake LOD Textures (coming soon)", icon='RENDER_STILL')

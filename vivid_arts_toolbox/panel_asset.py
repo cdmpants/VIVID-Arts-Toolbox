@@ -140,8 +140,20 @@ class VIVID_PT_texture_processing(Panel):
             row = box.row(align=True); row.prop(s, "engine",          text="Engine")
             row = box.row(align=True); row.prop(s, "save_only_release", text="Save only to Release")
             row = box.row(align=True); row.prop(s, "sharpen", text="Sharpen")
-            row = box.row(align=True); row.prop(s, "de_light_with_lightmap", text="De-light with Lightmap")
-            row = box.row(align=True); row.prop(s, "make_seamless", text="Make Seamless")
+            row = box.row(align=True); row.prop(s, "de_light_with_lightmap", text="Delight with Lightmap")
+            # Tiling controls
+            row = box.row(align=True); row.prop(s, "tile_x", text="Tile X")
+            if getattr(s, 'tile_x', False):
+                sub = box.column(align=True)
+                sub.prop(s, 'tile_x_threshold', text='Threshold')
+                sub.prop(s, 'tile_x_smoothness', text='Smoothness')
+                sub.prop(s, 'tile_x_contrast', text='Contrast')
+            row = box.row(align=True); row.prop(s, "tile_y", text="Tile Y")
+            if getattr(s, 'tile_y', False):
+                sub = box.column(align=True)
+                sub.prop(s, 'tile_y_threshold', text='Threshold')
+                sub.prop(s, 'tile_y_smoothness', text='Smoothness')
+                sub.prop(s, 'tile_y_contrast', text='Contrast')
         else:
             box.label(text="Light Removal settings not found.", icon='INFO')
         col = layout.column(align=True)

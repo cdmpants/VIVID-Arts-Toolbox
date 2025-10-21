@@ -160,17 +160,15 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 lod.data.materials.append(m)
             lod_names.append(lod.name)
 
-        # Data Transfer (normals from LOD0) — do not add to LOD0 itself
-        lod0_imp = bpy.data.objects.get(f"{base_label}_LOD0")
-        if lod0_imp:
+        # Data Transfer (normals from Cinema source) — apply to all imported LODs
+        src_obj = src  # use the original Cinema object as the transfer source
+        if src_obj:
             for name in lod_names:
-                if name.endswith('_LOD0'):
-                    continue
                 lod = bpy.data.objects.get(name)
                 if not lod:
                     continue
                 mod = lod.modifiers.new("DataTransfer", 'DATA_TRANSFER')
-                mod.object = lod0_imp
+                mod.object = src_obj
                 mod.use_loop_data = True
                 mod.data_types_loops = {'CUSTOM_NORMAL'}
                 mod.loop_mapping = 'POLYINTERP_LNORPROJ'

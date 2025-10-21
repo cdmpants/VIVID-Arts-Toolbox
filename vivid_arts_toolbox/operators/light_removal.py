@@ -1,10 +1,11 @@
 
 import bpy, os, re, math
 from bpy.types import Operator, PropertyGroup, Panel
-from bpy.props import EnumProperty, PointerProperty, BoolProperty
+from bpy.props import EnumProperty, PointerProperty, BoolProperty, FloatProperty
 
 from ..bake_textures import _folders, _find_baked_textures_ex, _remove_suffix, _find_optimized_object, _find_baked_textures_by_suffix_udim
 from ..bake_textures import _udim_tiles_from_object
+from ..metadata import _release_mirror_dir
 
 class VIVID_LightRemovalSettings(PropertyGroup):
     __annotations__ = {}
@@ -22,7 +23,7 @@ class VIVID_LightRemovalSettings(PropertyGroup):
     )
     __annotations__['save_only_release'] = BoolProperty(
         name="Save only to Release",
-        description="Only save outputs to the Release folder (placeholder)",
+        description="Only save outputs to the Release folder alongside exported FBXs and metadata",
         default=False,
     )
     __annotations__['sharpen'] = BoolProperty(
@@ -31,15 +32,27 @@ class VIVID_LightRemovalSettings(PropertyGroup):
         default=False,
     )
     __annotations__['de_light_with_lightmap'] = BoolProperty(
-        name="De-light with Lightmap",
+        name="Delight with Lightmap",
         description="Use lightmap to assist de-lighting (placeholder)",
         default=False,
     )
-    __annotations__['make_seamless'] = BoolProperty(
-        name="Make Seamless",
-        description="Attempt to make BaseColor seamless (placeholder)",
+    # Tiling controls
+    __annotations__['tile_x'] = BoolProperty(
+        name="Tile X",
+        description="Enable seamless tiling in X (exposes sliders)",
         default=False,
     )
+    __annotations__['tile_x_threshold'] = FloatProperty(name="Threshold", default=0.5, min=0.0, max=1.0)
+    __annotations__['tile_x_smoothness'] = FloatProperty(name="Smoothness", default=0.5, min=0.0, max=1.0)
+    __annotations__['tile_x_contrast'] = FloatProperty(name="Contrast", default=0.5, min=0.0, max=1.0)
+    __annotations__['tile_y'] = BoolProperty(
+        name="Tile Y",
+        description="Enable seamless tiling in Y (exposes sliders)",
+        default=False,
+    )
+    __annotations__['tile_y_threshold'] = FloatProperty(name="Threshold", default=0.5, min=0.0, max=1.0)
+    __annotations__['tile_y_smoothness'] = FloatProperty(name="Smoothness", default=0.5, min=0.0, max=1.0)
+    __annotations__['tile_y_contrast'] = FloatProperty(name="Contrast", default=0.5, min=0.0, max=1.0)
 
 class VIVID_OT_bake_delit(Operator):
     bl_idname = "vivid.bake_delit"
@@ -135,21 +148,39 @@ class VIVID_OT_bake_delit(Operator):
         except Exception:
             pass
 
-        # Output directory: ProcessTextures next to the .blend
+        # Output directory: ProcessTextures next to the .blend OR Release mirror
         root = bpy.path.abspath("//") or os.getcwd()
-        process_tex = os.path.join(root, "ProcessTextures")
-        os.makedirs(process_tex, exist_ok=True)
+        if bool(getattr(s, 'save_only_release', False)):
+            try:
+                release_dir = _release_mirror_dir(context)
+            except Exception:
+                release_dir = os.path.join(root, 'Release')
+            base_out_dir = release_dir
+        else:
+            base_out_dir = os.path.join(root, "ProcessTextures")
+        os.makedirs(base_out_dir, exist_ok=True)
         res = int(s.bake_resolution)
 
         def ensure_target_tex_node(mat):
             if not (mat and mat.use_nodes and mat.node_tree):
                 return None, None
             nt = mat.node_tree
-            node = nt.nodes.get("BaseColor") or nt.nodes.get("BaseColorOut") or nt.nodes.get("Delit")
+            # If "Delight with Lightmap" is enabled, bake to Lightmap node; else use BaseColor
+            if getattr(s, 'de_light_with_lightmap', False):
+                node = nt.nodes.get("Lightmap")
+                if not node:
+                    node = nt.nodes.new("ShaderNodeTexImage")
+                    node.name = "Lightmap"
+                    node.label = "Lightmap"
+                    node.location = (-800, 100)
+            else:
+                node = nt.nodes.get("BaseColor") or nt.nodes.get("BaseColorOut") or nt.nodes.get("Delit")
             if not node:
                 node = nt.nodes.new("ShaderNodeTexImage")
-                node.name = "BaseColor"
-                node.label = "BaseColor"
+                if getattr(s, 'de_light_with_lightmap', False):
+                    node.name = "Lightmap"; node.label = "Lightmap"
+                else:
+                    node.name = "BaseColor"; node.label = "BaseColor"
                 node.location = (-800, 300)
             return nt, node
 
@@ -174,9 +205,11 @@ class VIVID_OT_bake_delit(Operator):
                 uv_layer = me.uv_layers.active if hasattr(me, 'uv_layers') and me.uv_layers.active else None
                 for (u_off, v_off) in tiles:
                     udim_num = 1001 + u_off + v_off*10
-                    img_name = f"{base_name}_BaseColor_{udim_num}"
+                    # Name images based on target node to avoid confusion
+                    bake_target = 'Lightmap' if getattr(s, 'de_light_with_lightmap', False) else 'BaseColor'
+                    img_name = f"{base_name}_{bake_target}_{udim_num}"
                     if part_suffix:
-                        img_name = f"{base_name}_{part_suffix}_BaseColor_{udim_num}"
+                        img_name = f"{base_name}_{part_suffix}_{bake_target}_{udim_num}"
                     img = bpy.data.images.get(img_name)
                     if img is None:
                         img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
@@ -221,7 +254,11 @@ class VIVID_OT_bake_delit(Operator):
                             saved_uvs = []
                     # Bake
                     try:
-                        bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, target='IMAGE_TEXTURES', use_clear=True)
+                        if getattr(s, 'de_light_with_lightmap', False):
+                            # Bake only Direct + Indirect, no color for Lightmap target
+                            bpy.ops.object.bake(type='DIFFUSE', pass_filter={'DIRECT','INDIRECT'}, target='IMAGE_TEXTURES', use_clear=True)
+                        else:
+                            bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, target='IMAGE_TEXTURES', use_clear=True)
                     except Exception as e:
                         try:
                             for li, ux, uy in saved_uvs:
@@ -240,6 +277,11 @@ class VIVID_OT_bake_delit(Operator):
                     # Save
                     udim_str = f"{udim_num}"
                     outfile = os.path.join(out_dir, f"{base_name}_BaseColor_{udim_str}.tif") if not part_suffix else os.path.join(out_dir, f"{base_name}_{part_suffix}_BaseColor_{udim_str}.tif")
+                    # Lightmap bake does not need saving externally according to requirements
+                    if getattr(s, 'de_light_with_lightmap', False):
+                        # Skip saving to disk for Lightmap target
+                        baked.append(f"<baked:Lightmap:{udim_str}>")
+                        continue
                     os.makedirs(os.path.dirname(outfile), exist_ok=True)
                     img.filepath_raw = outfile
                     img.file_format = 'TIFF'
@@ -259,7 +301,7 @@ class VIVID_OT_bake_delit(Operator):
                     pass
 
         # Main material on object
-        baked_files.extend(bake_for_material(obj.active_material or (obj.material_slots[0].material if obj.material_slots else None), process_tex))
+        baked_files.extend(bake_for_material(obj.active_material or (obj.material_slots[0].material if obj.material_slots else None), base_out_dir))
 
         # Alternate materials: base_name_Part# created by baking procedure
         import re
@@ -270,7 +312,7 @@ class VIVID_OT_bake_delit(Operator):
                 alt_mats.append(m)
         for m in sorted(alt_mats, key=lambda x: x.name):
             part_token = m.name.split('_')[-1]  # PartX
-            out_dir = os.path.join(process_tex, part_token)
+            out_dir = os.path.join(base_out_dir, part_token)
             os.makedirs(out_dir, exist_ok=True)
             try:
                 baked_files.extend(bake_for_material(m, out_dir, part_suffix=part_token))
@@ -280,7 +322,7 @@ class VIVID_OT_bake_delit(Operator):
                 if prev_layer_denoise is not None: context.view_layer.cycles.use_denoising = prev_layer_denoise
                 return {'CANCELLED'}
         msg = ", ".join([os.path.basename(x) for x in baked_files]) if baked_files else "<none>"
-        self.report({'INFO'}, f"BaseColor processed: {msg}")
+        self.report({'INFO'}, f"Processed: {msg}")
 
         # restore visibility and denoise
         try:

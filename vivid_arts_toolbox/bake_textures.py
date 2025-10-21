@@ -7,7 +7,7 @@ import time
 import subprocess
 from pathlib import Path
 from bpy.types import Operator, PropertyGroup
-from bpy.props import BoolProperty, PointerProperty, EnumProperty
+from bpy.props import BoolProperty, PointerProperty, EnumProperty, StringProperty
 
 # ------------------------------------------------------------
 # Defaults & Paths
@@ -857,6 +857,12 @@ class VIVID_DesignerBakeSettings(PropertyGroup):
         items=_ENGINE_ITEMS,
         default="CPU",
     )
+    __annotations__['custom_highpoly_dir'] = StringProperty(
+        name="Custom HighPoly",
+        description="Optional folder to look for HighPoly FBX and textures instead of //BakeMesh",
+        subtype='DIR_PATH',
+        default=""
+    )
 
 # ------------------------------------------------------------
 # Operator
@@ -884,7 +890,18 @@ class VIVID_OT_bake_designer(Operator):
             self.report({'ERROR'}, f"Missing BakeMesh folder: {bake_mesh}")
             return {'CANCELLED'}
 
-        files = _find_inputs(bake_mesh)
+        # Allow overriding HighPoly search directory via custom_highpoly_dir
+        high_src_dir = bake_mesh
+        if settings and getattr(settings, 'custom_highpoly_dir', ''):
+            cand = bpy.path.abspath(getattr(settings, 'custom_highpoly_dir', '')).strip()
+            if cand and os.path.isdir(cand):
+                high_src_dir = cand
+        files = _find_inputs(high_src_dir)
+        # Always keep low/cage from local BakeMesh if not found in override dir
+        if not files.get('low') or not os.path.isfile(files.get('low', '')):
+            files['low'] = _glob_one(["*_Optimized.fbx", "*_optimized.fbx"], bake_mesh)
+        if not files.get('cage') or not os.path.isfile(files.get('cage', '')):
+            files['cage'] = _glob_one(["*_Cage.fbx", "*_cage.fbx"], bake_mesh)
         if not files.get("low"):
             self.report({'ERROR'}, "Missing required low mesh (e.g. *_Optimized.fbx) in BakeMesh.")
             return {'CANCELLED'}

@@ -28,6 +28,11 @@ class VIVID_PG_BakeProperties(bpy.types.PropertyGroup):
 class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
     """Properties for LOD generation and exports."""
     __annotations__ = {}
+    __annotations__['custom_lods'] = BoolProperty(
+        name="Custom LODs",
+        default=False,
+        description="Disable built-in LOD generation; you will manage LODs manually."
+    )
     __annotations__['generate_shadow_proxies'] = BoolProperty(
         name="Generate ShadowProxies",
         default=True,
@@ -42,22 +47,22 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
     __annotations__['lod0_ratio'] = FloatProperty(
         name="LOD0 Reduction",
         description="Target face ratio for LOD0 (reduced from Cinema).",
-        default=0.08, min=0.0, max=1.0, precision=3
+        default=0.025, min=0.0, max=1.0, precision=4
     )
     __annotations__['lod1_ratio'] = FloatProperty(
         name="LOD1 Reduction",
         description="Target face ratio for LOD1 (fraction of LOD0 faces).",
-        default=0.40, min=0.0, max=1.0, precision=3
+        default=0.010, min=0.0, max=1.0, precision=4
     )
     __annotations__['lod2_ratio'] = FloatProperty(
         name="LOD2 Reduction",
         description="Target face ratio for LOD2 (fraction of LOD0 faces).",
-        default=0.16, min=0.0, max=1.0, precision=3
+        default=0.004, min=0.0, max=1.0, precision=4
     )
     __annotations__['lod3_ratio'] = FloatProperty(
         name="LOD3 Reduction",
         description="Target face ratio for LOD3 (fraction of LOD0 faces).",
-        default=0.064, min=0.0, max=1.0, precision=3
+        default=0.0016, min=0.0, max=1.0, precision=4
     )
     __annotations__['collider_ratio'] = FloatProperty(
         name="MeshCollider Reduction",

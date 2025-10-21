@@ -102,7 +102,7 @@ class VIVID_PT_generate_asset(Panel):
 class VIVID_PT_setup_lods(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category   = "LODs"
+    bl_category   = "LOD"
     bl_parent_id  = "VIVID_PT_main_panel_lods"
     bl_label      = "Generate LODs"
     bl_order      = 30
@@ -191,7 +191,7 @@ class VIVID_PT_texture_processing(Panel):
             row = box.row(align=True); row.prop(s, "engine",          text="Engine")
             row = box.row(align=True); row.prop(s, "save_only_release", text="Save only to Release")
             row = box.row(align=True); row.prop(s, "sharpen", text="Sharpen")
-            row = box.row(align=True); row.prop(s, "de_light_with_lightmap", text="De-light with Lightmap")
+            row = box.row(align=True); row.prop(s, "de_light_with_lightmap", text="Delight with Lightmap")
             row = box.row(align=True); row.prop(s, "make_seamless", text="Make Seamless")
         else:
             box.label(text="Light Removal settings not found.", icon='INFO')
@@ -201,7 +201,7 @@ class VIVID_PT_texture_processing(Panel):
 class VIVID_PT_main_panel_lods(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category   = "LODs"
+    bl_category   = "LOD"
     bl_label      = "VIVID Arts Toolbox"
     bl_options    = {'HIDE_HEADER'}
 
@@ -211,7 +211,7 @@ class VIVID_PT_main_panel_lods(Panel):
 class VIEW3D_PT_shadowproxy_correction(Panel):
     bl_space_type='VIEW_3D'
     bl_region_type='UI'
-    bl_category  = "LODs"
+    bl_category  = "LOD"
     bl_parent_id = "VIVID_PT_main_panel_lods"
     bl_label     = "ShadowProxy Correction"
     bl_order     = 40
@@ -226,7 +226,6 @@ class VIEW3D_PT_shadowproxy_correction(Panel):
         row.prop(s,"sp_passes")
         row.prop(s,"sp_v_passes")
         box.prop(s,"sp_max_push")
-        row=box.row(align=True); row.prop(s,"sp_token_lod"); row.prop(s,"sp_token_proxy")
 
         layout.separator()
         col=layout.column(align=True)
@@ -235,7 +234,6 @@ class VIEW3D_PT_shadowproxy_correction(Panel):
         op.passes=s.sp_passes; op.v_passes=s.sp_v_passes; op.max_push=s.sp_max_push
         op.only_selected=s.sp_only_selected_pairs
         col.prop(s,"sp_only_selected_pairs")
-        col.operator("object.shadowproxy_list_pairs",text="List Pairs",icon='INFO')
         layout.separator()
         box2 = layout.box(); box2.label(text="LOD Textures", icon='RENDER_STILL')
         box2.label(text="Bake LOD Textures (coming soon)", icon='RENDER_STILL')

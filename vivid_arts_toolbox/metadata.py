@@ -156,6 +156,12 @@ class VIVID_OT_export_metadata_json(Operator):
 
         now = datetime.datetime.now().strftime('%Y-%m-%d')
         variant_count = _count_model_variants()
+        # Pull tiling flags from Texture Processing settings
+        lr = getattr(context.scene, 'vivid_light_removal', None)
+        tile_x_flag = bool(getattr(lr, 'tile_x', False)) if lr else False
+        tile_y_flag = bool(getattr(lr, 'tile_y', False)) if lr else False
+        custom_lods = bool(getattr(getattr(context.scene, 'vivid_lod_props', None), 'custom_lods', False))
+
         data = {
             "Main": {
                 "AssetID": s.asset_id or base,
@@ -172,6 +178,9 @@ class VIVID_OT_export_metadata_json(Operator):
                 "Last Updated": now,
                 "Version": s.version or "1.0",
                 "Model Variants": int(variant_count),
+                "Tile X": tile_x_flag,
+                "Tile Y": tile_y_flag,
+                "CustomLODs": custom_lods,
             },
             "Polycounts": {
                 "Cinema": s.poly_cinema or None,
@@ -192,6 +201,7 @@ class VIVID_OT_export_metadata_json(Operator):
                 "Static": s.importer_static,
             },
             "Labels": ([it.value for it in s.labels_coll] if getattr(s, 'labels_coll', None) and len(s.labels_coll) > 0 else [lbl.strip() for lbl in (s.labels or '').split(',') if lbl.strip()]),
+            "Description": getattr(s, 'description', "") or "",
             # "Textures": to be filled later
         }
 
@@ -423,6 +433,8 @@ def register():
     VIVID_Metadata.source_name = StringProperty(name="Source Name")
     VIVID_Metadata.capture_device = EnumProperty(name="Capture Device", items=_items_from('CaptureDevice', ['Nikon D5500','DJI Air 3']), default=_OPTIONS.get('CaptureDevice', ['DJI Air 3'])[0] if _OPTIONS.get('CaptureDevice') else 'DJI Air 3')
     VIVID_Metadata.source_notes = StringProperty(name="Notes")
+    # Description text (long form)
+    VIVID_Metadata.description = StringProperty(name="Description", description="Long description for this asset", default="")
 
     # Importer booleans (tickboxes)
     VIVID_Metadata.importer_allow_udim_merge = BoolProperty(name="Allow UDIM Merge", default=True)

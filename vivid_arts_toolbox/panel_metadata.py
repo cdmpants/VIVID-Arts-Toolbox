@@ -101,6 +101,12 @@ class VIVID_PT_metadata(Panel):
                 sub.prop(it, 'value', text="Label")
             # Legacy string UI for backward compatibility
             box.prop(s, 'labels')
+
+            # Description section at bottom
+            desc_box = layout.box(); desc_box.label(text="Description", icon='TEXT')
+            # Use a simple multiline text layout via split across multiple lines if supported
+            desc_col = desc_box.column(align=True)
+            desc_col.prop(s, 'description', text="", expand=False)
         else:
             layout.label(text="Metadata properties not found.", icon='ERROR')
 
