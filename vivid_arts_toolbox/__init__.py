@@ -81,6 +81,24 @@ def register():
     # Bake Textures (creates scene.vivid_designer_bake and registers VIVID_OT_bake_designer)
     bake_textures.register_designer_bake()
 
+    # Proactively unregister any legacy monolithic panels (panel.py) if they linger from older sessions
+    try:
+        _legacy = [
+            'VIVID_PT_main_panel_asset','VIVID_PT_surface','VIVID_PT_uv_mapping','VIVID_PT_bake_textures',
+            'VIVID_PT_generate_asset','VIVID_PT_export_asset','VIVID_PT_export_to_painter','VIVID_PT_texture_processing',
+            'VIVID_PT_main_panel_lods','VIVID_PT_setup_lods','VIEW3D_PT_shadowproxy_correction',
+            'VIVID_PT_main_panel_meta','VIVID_PT_metadata'
+        ]
+        for _name in _legacy:
+            cls = getattr(bpy.types, _name, None)
+            if cls:
+                try:
+                    bpy.utils.unregister_class(cls)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     # Panels (UI foldouts)
     panel_asset.register()
     panel_lods.register()
@@ -132,8 +150,4 @@ def unregister():
 
     print("VIVID Arts Toolbox Unregistered!")
 
-# Ensure Export to Painter module is loaded
-try:
-    from . import vivid_painter_export as _vpe
-except Exception as _e:
-    print('[VIVID] vivid_painter_export not loaded:', _e)
+# vivid_painter_export is deprecated and no longer imported; export_to_painter contains the UI and backend
