@@ -3,6 +3,7 @@ import os
 import subprocess
 import tempfile
 import sys # Import sys to get the executable path of the current Blender instance
+from pathlib import Path
 
 
 def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count, ratios=None):
@@ -92,6 +93,28 @@ def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_
     finally:
         if temp_filter_file and os.path.exists(temp_filter_file.name):
             os.remove(temp_filter_file.name)
+
+
+# ----------------------
+# Resource path helpers
+# ----------------------
+def resources_dir() -> Path:
+    """Return the path to the add-on's bundled resources directory.
+    We keep non-Python assets (blend/json/spp) under 'resources/'.
+    """
+    return Path(__file__).resolve().parent / "resources"
+
+
+def resource_path(name: str) -> Path:
+    """Preferred path: vivid_arts_toolbox/resources/<name>"""
+    return resources_dir() / name
+
+
+def resource_or_legacy(name: str) -> Path:
+    """Return the path to a resource under resources/ only.
+    Fallback to legacy locations has been removed to keep the add-on tidy.
+    """
+    return resource_path(name)
 
 
 def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count, ratios=None):

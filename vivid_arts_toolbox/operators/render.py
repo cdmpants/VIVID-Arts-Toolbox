@@ -2,6 +2,7 @@ import bpy
 import os
 from math import radians, sin
 from mathutils import Vector
+from ..utils import resource_or_legacy
 from bpy.types import Operator
 
 
@@ -171,11 +172,10 @@ class VIVID_OT_output_renders(Operator):
 
     def execute(self, context):
         # Resolve Render.blend path
-        addon = _addon_dir()
-        render_blend = os.path.join(addon, 'Render.blend')
+        render_blend = str(resource_or_legacy('Render.blend'))
         if not os.path.isfile(render_blend):
             # Fallback for environments where .blend1 is versioned
-            alt = os.path.join(addon, 'Render.blend1')
+            alt = str(resource_or_legacy('Render.blend1'))
             if os.path.isfile(alt):
                 render_blend = alt
             else:

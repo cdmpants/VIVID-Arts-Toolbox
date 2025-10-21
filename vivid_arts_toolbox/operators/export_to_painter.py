@@ -4,6 +4,7 @@ from bpy.types import PropertyGroup, Operator
 from bpy.props import EnumProperty, BoolProperty, PointerProperty
 import os, json, subprocess
 from pathlib import Path
+from ..utils import resource_or_legacy
 
 # Use NON-numeric IDs; map to ints in operator
 _RES_ITEMS = [
@@ -66,7 +67,7 @@ def _expect_file(p: Path, what: str):
         raise RuntimeError(f"Couldn't find {what}: {p}")
 
 def _copy_starter_spp(dst: Path):
-    src = _pkg_root() / "VIVID_Arts.spp"
+    src = resource_or_legacy("VIVID_Arts.spp")
     if not src.exists():
         raise RuntimeError("Starter SPP not found in add-on: VIVID_Arts.spp")
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -75,7 +76,7 @@ def _copy_starter_spp(dst: Path):
 
 def _template_path(is_surface: bool) -> Path:
     fname = "VIVID_Arts_Surface.spexp" if is_surface else "VIVID_Arts.spexp"
-    p = _pkg_root() / fname
+    p = resource_or_legacy(fname)
     if not p.exists():
         raise RuntimeError(f"Export template missing in add-on: {fname}")
     return p

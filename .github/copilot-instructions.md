@@ -7,6 +7,7 @@ Keep changes small and Blender-aware: this codebase registers Blender UI panels,
 - `vivid_arts_toolbox/properties.py` — PropertyGroup names and fields (e.g. `VIVID_PG_BakeProperties`, `vivid_lod_props`) that are attached to `bpy.types.Scene`.
 - DEPRECATED: `vivid_arts_toolbox/vivid_painter_export.py` — superseded by `vivid_arts_toolbox/operators/export_to_painter.py` which now contains the UI and backend (`run_export`, `_find_optimized_obj`, `_proj_dirs`). Use `operators.export_to_painter.run_export` in any scripts or tests.
 - `vivid_arts_toolbox/utils.py` and `operators/*` — LOD and baking helpers that call external tools (meshlabserver, PyMeshLab, Substance baker, external Blender invocation).
+- `vivid_arts_toolbox/resources/*` — bundled non-Python assets (blend/json/spp/spexp, readme). Resolve paths via `utils.resource_or_legacy()`.
 
 Quick rules for edits
 - Don't change Blender API ids (operator `bl_idname`, property names, or preference keys) without updating `__init__.py`, `panel.py`, and any UI code that references them.
@@ -28,7 +29,7 @@ Conventions and patterns to follow in PRs
 Examples to reference when implementing features
 - To add a new operator: see `operators/export_asset.py` — define `bl_idname` and `execute()`, then add the class to `_classes` in `__init__.py` or provide a `register()` wrapper.
 - To read preferences: in an Operator use `prefs = context.preferences.addons[PACKAGE].preferences` (pattern used in `operators/export_to_painter.py`).
-- To copy packaged templates: use `_addon_dir()` helper (see `export_to_painter._addon_dir`) and `Path` operations to keep OS-safe file handling.
+- To copy packaged templates/assets: prefer `utils.resource_or_legacy("<file>")` which targets `vivid_arts_toolbox/resources` with fallback to legacy root.
 
 What not to assume
 - This repo is not a standalone CLI tool — most code runs inside Blender's embedded Python and relies on Blender data (bpy). Don't run modules with plain Python without the Blender environment.

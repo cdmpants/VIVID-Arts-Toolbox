@@ -13,6 +13,7 @@ from ..bake_textures import (
     _apply_udim_to_json,
     _run_baker,
 )
+from ..utils import resource_or_legacy
 
 class VIVID_OT_bake_lod_textures(Operator):
     bl_idname = "vivid.bake_lod_textures"
@@ -113,9 +114,9 @@ class VIVID_OT_bake_lod_textures(Operator):
         if not os.path.isfile(exe_path):
             self.report({'ERROR'}, f"Designer baker not found: {exe_path}")
             return {'CANCELLED'}
-        preset_path = os.path.join(_addon_dir(), "bakeLOD_preset.json")
+        preset_path = str(resource_or_legacy("bakeLOD_preset.json"))
         if not os.path.isfile(preset_path):
-            self.report({'ERROR'}, f"Missing bakeLOD_preset.json in addon folder: {preset_path}")
+            self.report({'ERROR'}, f"Missing bakeLOD_preset.json: {preset_path}")
             return {'CANCELLED'}
 
         # Bake resolution and engine from Designer settings

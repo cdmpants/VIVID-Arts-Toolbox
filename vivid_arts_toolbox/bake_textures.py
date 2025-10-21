@@ -279,12 +279,9 @@ def _build_delighter_material_for_dir(base_name, bake_tex_dir, mat_name):
     if mat is None:
         mat = bpy.data.materials.new(mat_name)
     mat.use_nodes = True
-    # Ensure template present
-    try:
-        pkg_dir = os.path.dirname(os.path.abspath(__file__))
-    except Exception:
-        pkg_dir = os.path.dirname(__file__)
-    blend_path = os.path.join(pkg_dir, "Delighter.blend")
+    # Ensure template present (resources only)
+    from .utils import resource_or_legacy
+    blend_path = str(resource_or_legacy("Delighter.blend"))
     src_name = "Delighter"
     src_mat = bpy.data.materials.get(src_name)
     if src_mat is None and os.path.isfile(blend_path):
@@ -906,16 +903,11 @@ class VIVID_OT_bake_designer(Operator):
             self.report({'ERROR'}, "Missing required low mesh (e.g. *_Optimized.fbx) in BakeMesh.")
             return {'CANCELLED'}
 
-        # Always use the master preset shipped with the addon
-        addon_json = os.path.join(_addon_dir(), "bake_preset.json")
-        if os.path.isfile(addon_json):
-            main_json = addon_json
-        else:
-            # Fallback to project-local if addon copy is missing
-            main_json = os.path.join(bake_mesh, "bake_preset.json")
-
+        # Always use the master preset shipped with the addon (resources only)
+        from .utils import resource_or_legacy
+        main_json = str(resource_or_legacy("bake_preset.json"))
         if not os.path.isfile(main_json):
-            self.report({'ERROR'}, "Missing bake_preset.json (expected in addon folder or BakeMesh).")
+            self.report({'ERROR'}, "Missing bake_preset.json in add-on resources.")
             return {'CANCELLED'}
 
         # Resolution + engine
@@ -1056,16 +1048,12 @@ def _append_delighter_material(obj, bake_tex_dir):
     if base_name.endswith("_Optimized"):
         base_name = base_name[:-10]
 
-    # Resolve path to Delighter.blend next to this module
-    try:
-        pkg_dir = os.path.dirname(os.path.abspath(__file__))
-    except Exception:
-        pkg_dir = os.path.dirname(__file__)
-    blend_path = os.path.join(pkg_dir, "Delighter.blend")
+    # Resolve path to Delighter.blend from resources
+    from .utils import resource_or_legacy
+    blend_path = str(resource_or_legacy("Delighter.blend"))
     if not os.path.isfile(blend_path):
         print("[Delighter] Missing Delighter.blend")
         return
-
     # Discover textures, supporting UDIM groupings
     udim_map = _find_baked_textures_by_suffix_udim(bake_tex_dir, base_name)
     # Also compute single fallback set (non-UDIM)

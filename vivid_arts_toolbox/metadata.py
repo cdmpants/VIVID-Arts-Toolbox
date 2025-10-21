@@ -53,11 +53,9 @@ def _blend_basename_noext():
     return os.path.splitext(os.path.basename(p))[0]
 
 def _load_options():
-    try:
-        pkg_dir = os.path.dirname(os.path.abspath(__file__))
-    except Exception:
-        pkg_dir = os.path.dirname(__file__)
-    path = os.path.join(pkg_dir, "MetadataOptions.json")
+    # Load options from resources folder only
+    from .utils import resource_or_legacy
+    path = str(resource_or_legacy("MetadataOptions.json"))
     try:
         with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
