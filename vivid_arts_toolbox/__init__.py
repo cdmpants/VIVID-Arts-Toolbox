@@ -34,8 +34,8 @@ from .operators.render import VIVID_OT_output_renders
 # Modules with their own register() functions
 from .operators import shadowproxy_correction
 from .operators import light_removal   # existing
-# NEW: Export to Painter (self-registering like your other modules)
-from . import export_to_painter
+# NEW: Export to Painter under operators/
+from .operators import export_to_painter
 from .operators import generate_surface
 from .operators import unwrap_uvs
 from . import metadata
