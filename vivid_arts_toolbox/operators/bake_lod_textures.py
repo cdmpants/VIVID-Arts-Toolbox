@@ -4,11 +4,8 @@ from pathlib import Path
 
 from ..metadata import _release_mirror_dir
 from ..bake_textures import (
-    _addon_dir,
-    _folders,
     _ensure_outdir,
     _udim_tiles_from_object,
-    _glob_one,
     _load_and_patch_json,
     _apply_udim_to_json,
     _run_baker,

@@ -40,22 +40,7 @@ class VIVID_PT_metadata(Panel):
         sub = layout.column(align=True)
         sub.prop(context.scene, "vivid_metadata_reference_path", text="Reference JSON")
         sub.operator("vivid.load_reference_json", text="Load Reference Metadata JSON", icon='FILE_FOLDER')
-        # Camera Offsets + Output Renders controls
-        from bpy.props import FloatProperty
-        if not hasattr(bpy.types.Scene, "vivid_camera_offset_z"):
-            bpy.types.Scene.vivid_camera_offset_z = FloatProperty(
-                name="Camera Offset Z",
-                description="Rotation Z applied to CameraOffset_Z in the appended render scene",
-                subtype='ANGLE',
-                default=0.78539816339,  # 45 degrees in radians
-            )
-        if not hasattr(bpy.types.Scene, "vivid_camera_offset_x"):
-            bpy.types.Scene.vivid_camera_offset_x = FloatProperty(
-                name="Camera Offset X",
-                description="Rotation X applied to CameraOffset_X in the appended render scene",
-                subtype='ANGLE',
-                default=-0.43633231299,  # -25 degrees in radians
-            )
+        # Camera Offsets + Output Renders controls (properties are registered at module register())
         # Hide camera offset sliders when Asset Type is Surface (Surface flow does not use offsets)
         s = getattr(context.scene, 'vivid_metadata', None)
         if not s or getattr(s, 'asset_type', 'Model') != 'Surface':
@@ -140,7 +125,28 @@ _classes = (
 def register():
     for c in _classes:
         bpy.utils.register_class(c)
+    # Ensure camera offset properties on Scene
+    from bpy.props import FloatProperty
+    if not hasattr(bpy.types.Scene, "vivid_camera_offset_z"):
+        bpy.types.Scene.vivid_camera_offset_z = FloatProperty(
+            name="Camera Offset Z",
+            description="Rotation Z applied to CameraOffset_Z in the appended render scene",
+            subtype='ANGLE',
+            default=0.78539816339,  # 45 degrees in radians
+        )
+    if not hasattr(bpy.types.Scene, "vivid_camera_offset_x"):
+        bpy.types.Scene.vivid_camera_offset_x = FloatProperty(
+            name="Camera Offset X",
+            description="Rotation X applied to CameraOffset_X in the appended render scene",
+            subtype='ANGLE',
+            default=-0.43633231299,  # -25 degrees in radians
+        )
 
 def unregister():
+    # Remove camera offset properties
+    if hasattr(bpy.types.Scene, "vivid_camera_offset_z"):
+        del bpy.types.Scene.vivid_camera_offset_z
+    if hasattr(bpy.types.Scene, "vivid_camera_offset_x"):
+        del bpy.types.Scene.vivid_camera_offset_x
     for c in reversed(_classes):
         bpy.utils.unregister_class(c)
