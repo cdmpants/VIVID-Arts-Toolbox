@@ -426,17 +426,13 @@ def _run_baker(exe_path, json_path, log_path, cwd, use_cpu=False):
 # Export scope (only bake exports)
 # ------------------------------------------------------------
 def _try_export_bake_meshes_only():
-    for ns, op in [("vivid", "export_for_designer"), ("vivid", "export_asset")]:
-        try:
-            ns_ops = getattr(bpy.ops, ns, None)
-            if ns_ops:
-                fn = getattr(ns_ops, op, None)
-                if fn and fn.poll():
-                    fn()
-                    return True
-        except Exception:
-            pass
-    # Fallback: export Optimized and Cage locally into BakeMesh
+    """Export only bake meshes (Optimized, Cage, HighPoly, Part#_HighPoly) to BakeMesh.
+
+    We intentionally do NOT call the Cinema export operator here. Baking should not
+    trigger Cinema exports. If a dedicated 'vivid.export_for_designer' operator is
+    introduced in the future, we can prefer that here; until then, we always use
+    the local FBX export routine.
+    """
     try:
         root, bake_mesh, bake_tex = _folders()
         return _export_bake_meshes_local(bake_mesh)
