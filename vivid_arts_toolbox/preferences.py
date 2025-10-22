@@ -72,7 +72,7 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
             pass
         try:
             if not self.meshlab_executable_path:
-                cand = r"V:\\Dropbox\\Software\\meshlabserver.exe"
+                cand = r"V:\\Dropbox\\Software\\meshlab_windows_portable\\meshlabserver.exe"
                 if os.path.isfile(cand):
                     self.meshlab_executable_path = cand
         except Exception:
