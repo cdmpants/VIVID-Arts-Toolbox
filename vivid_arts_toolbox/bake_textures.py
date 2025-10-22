@@ -55,7 +55,14 @@ def _find_inputs(bake_mesh_dir):
     low  = _glob_one(["*_Optimized.fbx", "*_optimized.fbx"], bake_mesh_dir)
     high = _glob_one(["*_HighPoly.fbx", "*_highpoly.fbx", "*_HP.fbx"], bake_mesh_dir)
     cage = _glob_one(["*_Cage.fbx", "*_cage.fbx"], bake_mesh_dir)
-    diff = _glob_one(["*_u0_v0_diffuse.png", "*_u0_v0_diffuse.*", "*diffuse.*"], bake_mesh_dir)
+    # TextureTransfer source texture: prefer common naming; include HighPoly.* as a robust fallback
+    # Only consider image files for the TextureTransfer source (avoid matching FBX)
+    diff = _glob_one([
+        "*_u0_v0_diffuse.png", "*_u0_v0_diffuse.jpg", "*_u0_v0_diffuse.jpeg", "*_u0_v0_diffuse.tif", "*_u0_v0_diffuse.tiff", "*_u0_v0_diffuse.exr", "*_u0_v0_diffuse.tga",
+        "*diffuse.png", "*diffuse.jpg", "*diffuse.jpeg", "*diffuse.tif", "*diffuse.tiff", "*diffuse.exr", "*diffuse.tga",
+        "*_HighPoly.png", "*_HighPoly.jpg", "*_HighPoly.jpeg", "*_HighPoly.tif", "*_HighPoly.tiff", "*_HighPoly.exr", "*_HighPoly.tga",
+        "*_highpoly.png", "*_highpoly.jpg", "*_highpoly.jpeg", "*_highpoly.tif", "*_highpoly.tiff", "*_highpoly.exr", "*_highpoly.tga",
+    ], bake_mesh_dir)
     # Gather additional _Part#_HighPoly FBXs
     high_parts = []
     try:
@@ -98,9 +105,22 @@ def _update_json_paths(data, files_map, output_dir):
     # CommonProjection dictionary
     cp = data.get("CommonProjection")
     if isinstance(cp, dict):
+        # High poly: require explicit replacement; otherwise blank to avoid stale template paths
         if files_map.get("high"):
             cp["high_scene_paths"] = [files_map["high"]]
-        _set_if_present(cp, "cage_scene_path", files_map.get("cage"))
+        elif "high_scene_paths" in cp:
+            cp["high_scene_paths"] = []
+        # Cage: optional; blank if not provided to avoid stale template paths
+        if files_map.get("cage"):
+            cp["cage_scene_path"] = files_map["cage"]
+        elif "cage_scene_path" in cp:
+            cp["cage_scene_path"] = ""
+        # Toggle cage usage based on presence of a valid cage file
+        try:
+            use_cage = bool(files_map.get("cage") and os.path.isfile(files_map.get("cage", "")))
+        except Exception:
+            use_cage = False
+        cp["use_cage"] = use_cage
 
     # Optional 'output' block normalization
     out = data.get("output")
@@ -135,10 +155,10 @@ def _update_json_paths(data, files_map, output_dir):
                 if v.lower().endswith(".fbx"):
                     if "low" in lk and files_map.get("low"):
                         params[k] = files_map["low"]
-                    elif "high" in lk and files_map.get("high"):
-                        params[k] = files_map["high"]
-                    elif "cage" in lk and files_map.get("cage"):
-                        params[k] = files_map["cage"]
+                    elif "high" in lk:
+                        params[k] = files_map.get("high", "")
+                    elif "cage" in lk:
+                        params[k] = files_map.get("cage", "")
 
     for baker in data.get("bakers", []):
         if not isinstance(baker, dict):
@@ -899,13 +919,25 @@ class VIVID_OT_bake_designer(Operator):
             if cand and os.path.isdir(cand):
                 high_src_dir = cand
         files = _find_inputs(high_src_dir)
-        # Always keep low/cage from local BakeMesh if not found in override dir
+        # Always keep low/high/cage from local BakeMesh if not found in override dir
         if not files.get('low') or not os.path.isfile(files.get('low', '')):
             files['low'] = _glob_one(["*_Optimized.fbx", "*_optimized.fbx"], bake_mesh)
+        if not files.get('high') or not os.path.isfile(files.get('high', '')):
+            files['high'] = _glob_one(["*_HighPoly.fbx", "*_highpoly.fbx", "*_HP.fbx"], bake_mesh)
         if not files.get('cage') or not os.path.isfile(files.get('cage', '')):
             files['cage'] = _glob_one(["*_Cage.fbx", "*_cage.fbx"], bake_mesh)
+        if not files.get('diffuse') or not os.path.isfile(files.get('diffuse', '')):
+            files['diffuse'] = _glob_one([
+                "*_u0_v0_diffuse.png", "*_u0_v0_diffuse.jpg", "*_u0_v0_diffuse.jpeg", "*_u0_v0_diffuse.tif", "*_u0_v0_diffuse.tiff", "*_u0_v0_diffuse.exr", "*_u0_v0_diffuse.tga",
+                "*diffuse.png", "*diffuse.jpg", "*diffuse.jpeg", "*diffuse.tif", "*diffuse.tiff", "*diffuse.exr", "*diffuse.tga",
+                "*_HighPoly.png", "*_HighPoly.jpg", "*_HighPoly.jpeg", "*_HighPoly.tif", "*_HighPoly.tiff", "*_HighPoly.exr", "*_HighPoly.tga",
+                "*_highpoly.png", "*_highpoly.jpg", "*_highpoly.jpeg", "*_highpoly.tif", "*_highpoly.tiff", "*_highpoly.exr", "*_highpoly.tga",
+            ], bake_mesh)
         if not files.get("low"):
             self.report({'ERROR'}, "Missing required low mesh (e.g. *_Optimized.fbx) in BakeMesh.")
+            return {'CANCELLED'}
+        if not files.get("high"):
+            self.report({'ERROR'}, "Missing required high mesh (e.g. *_HighPoly.fbx) in BakeMesh or override directory.")
             return {'CANCELLED'}
 
         # Always use the master preset shipped with the addon (resources only)
