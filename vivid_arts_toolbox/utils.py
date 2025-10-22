@@ -117,6 +117,58 @@ def resource_or_legacy(name: str) -> Path:
     return resource_path(name)
 
 
+# ----------------------
+# Project directory helpers
+# ----------------------
+def project_dirs() -> tuple[Path, Path, Path]:
+    """Return (root, BakeMesh, BakeTextures) based on the current .blend location.
+
+    Root is the directory containing the current .blend file. This function does not
+    create any directories; callers can create them as needed.
+
+    Raises:
+        RuntimeError: If the current .blend has not been saved yet.
+    """
+    blend_path = Path(bpy.data.filepath)
+    if not blend_path:
+        raise RuntimeError("Please save your .blend file first.")
+    root = blend_path.parent
+    return root, root / "BakeMesh", root / "BakeTextures"
+
+
+# ----------------------
+# Naming helpers (asset conventions)
+# ----------------------
+def is_optimized_name(name: str) -> bool:
+    """True if name ends with '_Optimized' (case-sensitive)."""
+    return isinstance(name, str) and name.endswith("_Optimized")
+
+
+def base_from_optimized(name: str) -> str:
+    """Strip '_Optimized' suffix if present; otherwise return name unchanged."""
+    if is_optimized_name(name):
+        return name[:-10]
+    return name
+
+
+def lod_suffix(index: int) -> str:
+    """Return LOD suffix like '_LOD0' for index 0."""
+    return f"_LOD{int(index)}"
+
+
+def lod_name(base: str, index: int) -> str:
+    """Return full LOD object name from base and index (e.g., 'Rock_LOD1')."""
+    return f"{base}{lod_suffix(index)}"
+
+
+def is_lod_name(name: str) -> bool:
+    """True if name ends with a LOD suffix like _LOD0 … _LOD9."""
+    if not isinstance(name, str):
+        return False
+    import re
+    return re.search(r"_LOD\d+$", name) is not None
+
+
 def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count, ratios=None):
     """Helper function to encapsulate PyMeshLab logic."""
     try:

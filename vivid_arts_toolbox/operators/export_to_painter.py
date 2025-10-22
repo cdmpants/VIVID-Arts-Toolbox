@@ -2,9 +2,9 @@
 import bpy
 from bpy.types import PropertyGroup, Operator
 from bpy.props import EnumProperty, BoolProperty, PointerProperty
-import os, json, subprocess
+import json, subprocess
 from pathlib import Path
-from ..utils import resource_or_legacy
+from ..utils import resource_or_legacy, project_dirs, is_optimized_name, base_from_optimized
 
 # Use NON-numeric IDs; map to ints in operator
 _RES_ITEMS = [
@@ -39,28 +39,14 @@ class VIVID_PG_ExportToPainter(PropertyGroup):
         default=True,
     )
 
-def _pkg_root() -> Path:
-    # operators/ -> package root
-    return Path(__file__).resolve().parent.parent
-
 def _find_optimized_obj(context) -> bpy.types.Object:
     o = context.active_object
-    if o and o.type == 'MESH' and o.name.endswith("_Optimized"):
+    if o and o.type == 'MESH' and is_optimized_name(o.name):
         return o
     for t in context.scene.objects:
-        if t.type == 'MESH' and t.name.endswith("_Optimized"):
+        if t.type == 'MESH' and is_optimized_name(t.name):
             return t
     raise RuntimeError("No *_Optimized mesh found in the scene.")
-
-def _base_name(o: bpy.types.Object) -> str:
-    return o.name[:-10] if o.name.endswith("_Optimized") else o.name
-
-def _proj_dirs():
-    blend = Path(bpy.data.filepath)
-    if not blend:
-        raise RuntimeError("Please save your .blend file first.")
-    root = blend.parent
-    return root, root / "BakeMesh", root / "BakeTextures"
 
 def _expect_file(p: Path, what: str):
     if not p.exists():
@@ -109,8 +95,8 @@ def run_export(context,
         export_dir = texture_export_dir
 
     opt = _find_optimized_obj(context)
-    base = _base_name(opt)
-    root, bake_mesh, bake_tex = _proj_dirs()
+    base = base_from_optimized(opt.name)
+    root, bake_mesh, bake_tex = project_dirs()
 
     fbx = bake_mesh / f"{base}_Optimized.fbx"
     _expect_file(fbx, "Optimized FBX in BakeMesh")
@@ -201,6 +187,8 @@ def register():
     bpy.types.Scene.vivid_export_to_painter = PointerProperty(type=VIVID_PG_ExportToPainter)
 
 def unregister():
-    del bpy.types.Scene.vivid_export_to_painter
+    # Be defensive in case registration failed partially
+    if hasattr(bpy.types.Scene, 'vivid_export_to_painter'):
+        del bpy.types.Scene.vivid_export_to_painter
     for c in reversed(_classes):
         bpy.utils.unregister_class(c)

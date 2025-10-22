@@ -21,10 +21,17 @@ def _blend_dir():
 # _addon_dir was used for legacy resource lookup; no longer needed
 
 def _folders():
-    root = _blend_dir()
-    bake_mesh = os.path.join(root, "BakeMesh")
-    bake_tex = os.path.join(root, "BakeTextures")
-    return root, bake_mesh, bake_tex
+    # Centralized via utils.project_dirs()
+    from .utils import project_dirs
+    try:
+        root_p, bake_mesh_p, bake_tex_p = project_dirs()
+        return str(root_p), str(bake_mesh_p), str(bake_tex_p)
+    except Exception:
+        # Fallback to // if unsaved; maintain previous behavior for unsaved scenarios
+        root = _blend_dir()
+        bake_mesh = os.path.join(root, "BakeMesh")
+        bake_tex = os.path.join(root, "BakeTextures")
+        return root, bake_mesh, bake_tex
 
 def _ensure_outdir():
     root, bake_mesh, bake_tex = _folders()
