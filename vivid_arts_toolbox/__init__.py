@@ -38,6 +38,8 @@ from .operators import light_removal   # existing
 from .operators import export_to_painter
 from .operators import generate_surface
 from .operators import unwrap_uvs
+from .operators import setup_materials
+from .operators import udim_material_assignment
 from . import metadata
 
 # Classes that need bpy.utils.register_class(...)
@@ -110,6 +112,8 @@ def register():
     generate_surface.register()
     unwrap_uvs.register()
     metadata.register()
+    setup_materials.register()
+    udim_material_assignment.register()
     
 
     # NEW: Export to Painter props/op (adds scene.vivid_export_to_painter and operator)
@@ -127,6 +131,14 @@ def unregister():
     generate_surface.unregister()
     unwrap_uvs.unregister()
     metadata.unregister()
+    try:
+        udim_material_assignment.unregister()
+    except Exception:
+        pass
+    try:
+        setup_materials.unregister()
+    except Exception:
+        pass
     
     panel_metadata.unregister()
     panel_lods.unregister()

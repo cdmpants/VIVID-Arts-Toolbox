@@ -69,6 +69,11 @@ class VIVID_PT_bake_textures(Panel):
         else:
             box.label(text="Designer bake settings not found (scene.vivid_designer_bake).", icon='INFO')
         col = layout.column(align=True)
+        # Force Material Refresh button (runs setup_materials) placed above Bake Designer Textures
+        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "setup_materials"):
+            col.operator("vivid.setup_materials", text="Force Material Refresh", icon='MATERIAL')
+        else:
+            col.label(text="Operator vivid.setup_materials not registered.", icon='ERROR')
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "bake_designer"):
             col.operator("vivid.bake_designer", text="Bake Designer Textures", icon='RENDER_STILL')
         else:

@@ -3,9 +3,12 @@ import bpy, os, re, math
 from bpy.types import Operator, PropertyGroup, Panel
 from bpy.props import EnumProperty, PointerProperty, BoolProperty, FloatProperty
 
-from ..bake_textures import _folders, _find_baked_textures_ex, _remove_suffix, _find_optimized_object, _find_baked_textures_by_suffix_udim
+from ..bake_textures import _folders, _find_optimized_object
 from ..bake_textures import _udim_tiles_from_object
 from ..metadata import _release_mirror_dir
+
+def _remove_suffix(name: str, suffix: str):
+    return name[:-len(suffix)] if name.endswith(suffix) else name
 
 class VIVID_LightRemovalSettings(PropertyGroup):
     __annotations__ = {}
