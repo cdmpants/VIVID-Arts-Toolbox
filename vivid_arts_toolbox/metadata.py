@@ -405,7 +405,7 @@ def register():
     for c in CLASSES:
         bpy.utils.register_class(c)
     # Define properties dynamically to avoid static typing false-positives
-    VIVID_Metadata.asset_id = StringProperty(name="AssetID", description="Auto-filled from folder name")
+    VIVID_Metadata.asset_id = StringProperty(name="AssetID", description="Auto-filled from .blend filename")
     VIVID_Metadata.display_name = StringProperty(name="DisplayName")
     VIVID_Metadata.asset_type = EnumProperty(name="AssetType", items=[('Model','Model',''),('Surface','Surface','')], default='Model')
     # Build items lists from _OPTIONS with sensible fallbacks
@@ -461,21 +461,14 @@ def register():
             s = getattr(scene, 'vivid_metadata', None)
             if not s:
                 return
-            fp = bpy.data.filepath
-            base_noext = "untitled"
-            if fp:
-                # Prefer parent folder name
-                try:
-                    parent = os.path.basename(os.path.dirname(fp))
-                    if parent:
-                        base_noext = parent
-                    else:
-                        base = bpy.path.basename(fp)
-                        base_noext = os.path.splitext(base)[0] if base else "untitled"
-                except Exception:
-                    base = bpy.path.basename(fp)
-                    base_noext = os.path.splitext(base)[0] if base else "untitled"
-            if not s.asset_id:
+            # Prefer the current .blend filename (without extension)
+            try:
+                base_noext = _blend_basename_noext()
+            except Exception:
+                base_noext = "untitled"
+            # Overwrite only if not set or still at the placeholder value
+            cur = (getattr(s, 'asset_id', '') or '').strip()
+            if cur == "" or cur.lower() == "untitled":
                 s.asset_id = base_noext
         except Exception:
             pass
@@ -491,6 +484,12 @@ def register():
         pass
     try:
         bpy.app.handlers.save_post.append(_on_save_post)
+    except Exception:
+        pass
+    # Ensure current open scenes are initialized immediately (covers enabling add-on mid-session)
+    try:
+        for sc in bpy.data.scenes:
+            _ensure_asset_id(sc)
     except Exception:
         pass
 

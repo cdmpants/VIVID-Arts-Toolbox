@@ -2,7 +2,7 @@
     "Common": {
         "base.uv_set": 0,
         "output_format": "tif",
-        "output_name": "$(material)_$(bakername)",
+        "output_name": "{scenename}_{udim}_{bakername}",
         "output_size": [
             4096,
             4096

@@ -823,9 +823,21 @@ def _udim_tiles_from_object(obj) -> list:
         if not me or not getattr(me, 'uv_layers', None) or len(me.uv_layers) == 0:
             return []
         uv_layer = me.uv_layers.active or me.uv_layers[0]
+        EPS = 1e-6
+        def _tile_index(x: float) -> int:
+            """Map UV coordinate to UDIM tile index along one axis.
+            Treat exact positive-integer boundaries (>=1) within a tiny epsilon as belonging to the
+            previous tile so faces on the 0-1 edge don't incorrectly spill into the next UDIM tile.
+            Example: x == 1.0 -> tile 0; x == 2.0 -> tile 1; x == 0.0 stays tile 0.
+            """
+            n = math.floor(x)
+            # Only adjust when we're at (or extremely close to) a positive integer boundary >= 1
+            if x >= 0.0 and n >= 1 and (x - n) >= 0.0 and (x - n) < EPS:
+                x = x - EPS
+            return int(math.floor(x))
         for luv in uv_layer.data:
-            u = int(math.floor(luv.uv.x))
-            v = int(math.floor(luv.uv.y))
+            u = _tile_index(float(luv.uv.x))
+            v = _tile_index(float(luv.uv.y))
             tiles.add((u, v))
     except Exception:
         return []
