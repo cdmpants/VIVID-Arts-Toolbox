@@ -10,6 +10,14 @@ from ..metadata import _release_mirror_dir
 def _remove_suffix(name: str, suffix: str):
     return name[:-len(suffix)] if name.endswith(suffix) else name
 
+def _delighter_update(self, context):
+    """Property update callback: apply delighter slider values live to materials."""
+    try:
+        apply_delighter_to_materials(self)
+    except Exception:
+        pass
+
+
 class VIVID_LightRemovalSettings(PropertyGroup):
     __annotations__ = {}
     __annotations__['bake_resolution'] = EnumProperty(
@@ -38,7 +46,25 @@ class VIVID_LightRemovalSettings(PropertyGroup):
         name="Delight with Lightmap",
         description="Use lightmap to assist de-lighting (placeholder)",
         default=False,
+        update=_delighter_update,
     )
+    # Delighter UI
+    __annotations__['show_delighter_options'] = BoolProperty(
+        name="Show Delighter Options",
+        description="Reveal the DelighterGroup sliders",
+        default=True,
+    )
+    __annotations__['divide_ao'] = FloatProperty(name="Divide AO", default=0.3, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['divide_r'] = FloatProperty(name="Divide R", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['divide_g'] = FloatProperty(name="Divide G", default=1.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['divide_b'] = FloatProperty(name="Divide B", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['invert_r'] = FloatProperty(name="Invert R", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['invert_g'] = FloatProperty(name="Invert G", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['invert_b'] = FloatProperty(name="Invert B", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    # Lightmap-specific sliders
+    __annotations__['divide_lightmap'] = FloatProperty(name="Divide Lightmap", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['lightmap_brightness'] = FloatProperty(name="Lightmap Brightness", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['lightmap_contrast'] = FloatProperty(name="Lightmap Contrast", default=0.0, min=0.0, max=1.0, update=_delighter_update)
     # Tiling controls
     __annotations__['tile_x'] = BoolProperty(
         name="Tile X",
@@ -67,6 +93,12 @@ class VIVID_OT_bake_delit(Operator):
         if not s:
             self.report({'ERROR'}, "Light Removal settings not found on scene.")
             return {'CANCELLED'}
+
+        # Apply Delighter sliders to materials on Optimized object (Part1 only)
+        try:
+            apply_delighter_to_materials(s)
+        except Exception:
+            pass
 
         scene = context.scene
         # Switch engine
@@ -336,6 +368,66 @@ class VIVID_OT_bake_delit(Operator):
         if prev_scene_denoise is not None: scene.cycles.use_denoising = prev_scene_denoise
         if prev_layer_denoise is not None: context.view_layer.cycles.use_denoising = prev_layer_denoise
         return {'FINISHED'}
+
+
+def apply_delighter_to_materials(s):
+    """Apply UI slider values to the DelighterGroup of eligible materials.
+    Eligible = assigned materials on the Optimized object whose names are either:
+      - <Object>_<UDIM>
+      - <Object>_Part1_<UDIM> (include Part1)
+      - Any material without a _Part# segment
+    Exclude Part2 and above.
+    """
+    import re
+    obj = _find_optimized_object()
+    if not obj or obj.type != 'MESH':
+        return
+    mats = [sl.material for sl in obj.material_slots if sl.material]
+    part_pat = re.compile(r"_Part(\d+)(?:_|$)")
+    for m in mats:
+        try:
+            # Determine part index if present
+            part_idx = None
+            mt = part_pat.search(m.name)
+            if mt:
+                try:
+                    part_idx = int(mt.group(1))
+                except Exception:
+                    part_idx = None
+            # Skip Part >= 2; include None and Part1
+            if part_idx is not None and part_idx >= 2:
+                continue
+            if not (m.use_nodes and m.node_tree):
+                continue
+            nt = m.node_tree
+            # Find a group node named DelighterGroup
+            target = None
+            for n in nt.nodes:
+                if getattr(n, 'type', '') == 'GROUP' and (n.name == 'DelighterGroup' or (getattr(n, 'node_tree', None) and getattr(n.node_tree, 'name', '') == 'DelighterGroup')):
+                    target = n
+                    break
+            if not target:
+                continue
+            def set_input(name, val):
+                try:
+                    sock = target.inputs.get(name)
+                    if sock is not None and hasattr(sock, 'default_value'):
+                        sock.default_value = float(val)
+                except Exception:
+                    pass
+            set_input('Divide AO', getattr(s, 'divide_ao', 0.3))
+            set_input('Divide R', getattr(s, 'divide_r', 0.0))
+            set_input('Divide G', getattr(s, 'divide_g', 1.0))
+            set_input('Divide B', getattr(s, 'divide_b', 0.0))
+            set_input('Invert R', getattr(s, 'invert_r', 0.0))
+            set_input('Invert G', getattr(s, 'invert_g', 0.0))
+            set_input('Invert B', getattr(s, 'invert_b', 0.0))
+            if getattr(s, 'de_light_with_lightmap', False):
+                set_input('Divide Lightmap', getattr(s, 'divide_lightmap', 0.0))
+                set_input('Lightmap Brightness', getattr(s, 'lightmap_brightness', 0.0))
+                set_input('Lightmap Contrast', getattr(s, 'lightmap_contrast', 0.0))
+        except Exception:
+            pass
         
 CLASSES = (VIVID_LightRemovalSettings, VIVID_OT_bake_delit)
 

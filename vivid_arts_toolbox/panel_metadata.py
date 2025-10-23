@@ -74,6 +74,12 @@ class VIVID_PT_metadata(Panel):
             col.prop(s, 'location')
             col.prop(s, 'date_captured')
             col.prop(s, 'version')
+            # New: Set dropdown between Version and Released
+            if hasattr(s, 'set'):
+                col.prop(s, 'set', text="Set")
+            # New: Released at very bottom of Main
+            if hasattr(s, 'released'):
+                col.prop(s, 'released', text="Released")
 
             box = layout.box(); box.label(text="Polycounts", icon='MESH_DATA')
             col = box.column(align=True)

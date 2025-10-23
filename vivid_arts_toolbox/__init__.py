@@ -40,6 +40,7 @@ from .operators import generate_surface
 from .operators import unwrap_uvs
 from .operators import setup_materials
 from .operators import udim_material_assignment
+from .operators import import_source
 from . import metadata
 
 # Classes that need bpy.utils.register_class(...)
@@ -114,6 +115,7 @@ def register():
     metadata.register()
     setup_materials.register()
     udim_material_assignment.register()
+    import_source.register()
     
 
     # NEW: Export to Painter props/op (adds scene.vivid_export_to_painter and operator)
@@ -137,6 +139,10 @@ def unregister():
         pass
     try:
         setup_materials.unregister()
+    except Exception:
+        pass
+    try:
+        import_source.unregister()
     except Exception:
         pass
     

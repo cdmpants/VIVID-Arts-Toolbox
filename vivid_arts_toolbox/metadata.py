@@ -176,6 +176,8 @@ class VIVID_OT_export_metadata_json(Operator):
                 "Date Captured": s.date_captured or "Unknown",
                 "Last Updated": now,
                 "Version": s.version or "1.0",
+                "Set": getattr(s, 'set', "") or "",
+                "Released": bool(getattr(s, 'released', True)),
                 "Model Variants": int(variant_count),
                 "Tile X": tile_x_flag,
                 "Tile Y": tile_y_flag,
@@ -268,6 +270,14 @@ class VIVID_OT_reload_local_json(Operator):
             s.size = m.get('Size', 'Medium')
             s.date_captured = m.get('Date Captured', '')
             s.version = m.get('Version', '1.0')
+            try:
+                s.set = m.get('Set', getattr(s, 'set', 'None'))
+            except Exception:
+                pass
+            try:
+                s.released = bool(m.get('Released', getattr(s, 'released', True)))
+            except Exception:
+                pass
             p = data.get('Polycounts', {})
             s.poly_cinema = str(p.get('Cinema', '') or '')
             s.poly_lod0 = str(p.get('LOD0', '') or '')
@@ -422,6 +432,12 @@ def register():
     VIVID_Metadata.size = EnumProperty(name="Size", items=_items_from('Size', ['Tiny','Small','Medium','Big','Huge','Massive']), default=_OPTIONS.get('Size', ['Medium'])[0] if _OPTIONS.get('Size') else 'Medium')
     VIVID_Metadata.date_captured = StringProperty(name="Date Captured")
     VIVID_Metadata.version = StringProperty(name="Version", description="Version string", default="1.0")
+    # New fields
+    def _items_set():
+        seq = _OPTIONS.get('Set', ["None"])
+        return [(v, v, "") for v in (seq if seq else ["None"]) ]
+    VIVID_Metadata.set = EnumProperty(name="Set", items=_items_set(), default=_OPTIONS.get('Set', ["None"])[0] if _OPTIONS.get('Set') else "None")
+    VIVID_Metadata.released = BoolProperty(name="Released", default=True)
 
     VIVID_Metadata.poly_cinema = StringProperty(name="Cinema")
     VIVID_Metadata.poly_lod0 = StringProperty(name="LOD0")

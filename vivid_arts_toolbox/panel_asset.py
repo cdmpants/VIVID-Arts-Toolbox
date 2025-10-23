@@ -11,13 +11,31 @@ class VIVID_PT_main_panel_asset(Panel):
     def draw(self, context):
         pass
 
+class VIVID_PT_import_source(Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category   = "Asset"
+    bl_parent_id  = "VIVID_PT_main_panel_asset"
+    bl_label      = "Import Source"
+    bl_order      = 1
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column(align=True)
+        # Tickbox above the button
+        col.prop(context.scene, "vivid_import_simplified_as_optimized", text="Import Simplified as Optimized")
+        # Import button
+        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "import_simplified"):
+            col.operator("vivid.import_simplified", text="Import Simplified Model", icon='IMPORT')
+        else:
+            col.label(text="Operator vivid.import_simplified not registered.", icon='ERROR')
+
 class VIVID_PT_surface(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category   = "Asset"
     bl_parent_id  = "VIVID_PT_main_panel_asset"
     bl_label      = "Surface"
-    bl_order      = 1
+    bl_order      = 2
     def draw(self, context):
         layout = self.layout
         box = layout.box()
@@ -39,7 +57,7 @@ class VIVID_PT_uv_mapping(Panel):
     bl_category   = "Asset"
     bl_parent_id  = "VIVID_PT_main_panel_asset"
     bl_label      = "UV Mapping"
-    bl_order      = 2
+    bl_order      = 3
     def draw(self, context):
         layout = self.layout
         box = layout.box()
@@ -55,7 +73,7 @@ class VIVID_PT_bake_textures(Panel):
     bl_category   = "Asset"
     bl_parent_id  = "VIVID_PT_main_panel_asset"
     bl_label      = "Bake Textures"
-    bl_order      = 10
+    bl_order      = 11
     def draw(self, context):
         layout = self.layout
         s = getattr(context.scene, "vivid_designer_bake", None)
@@ -101,7 +119,7 @@ class VIVID_PT_generate_asset(Panel):
     bl_category   = "Asset"
     bl_parent_id  = "VIVID_PT_main_panel_asset"
     bl_label      = "Cinema Model"
-    bl_order      = 20
+    bl_order      = 21
     def draw(self, context):
         layout = self.layout
         col = layout.column(align=True)
@@ -124,7 +142,7 @@ class VIVID_PT_export_to_painter(Panel):
     bl_category   = "Asset"
     bl_parent_id  = "VIVID_PT_main_panel_asset"
     bl_label      = "Export to Painter"
-    bl_order      = 60
+    bl_order      = 61
     def draw(self, context):
         layout = self.layout
         v = getattr(context.scene, "vivid_export_to_painter", None)
@@ -150,7 +168,7 @@ class VIVID_PT_texture_processing(Panel):
     bl_category   = "Asset"
     bl_parent_id  = "VIVID_PT_main_panel_asset"
     bl_label      = "Texture Processing"
-    bl_order      = 15
+    bl_order      = 16
     def draw(self, context):
         layout = self.layout
         s = getattr(context.scene, "vivid_light_removal", None)
@@ -159,9 +177,23 @@ class VIVID_PT_texture_processing(Panel):
         if s:
             row = box.row(align=True); row.prop(s, "bake_resolution", text="Bake Resolution")
             row = box.row(align=True); row.prop(s, "engine",          text="Engine")
-            row = box.row(align=True); row.prop(s, "save_only_release", text="Save only to Release")
-            row = box.row(align=True); row.prop(s, "sharpen", text="Sharpen")
-            row = box.row(align=True); row.prop(s, "de_light_with_lightmap", text="Delight with Lightmap")
+            # Show Delighter options toggle below Engine
+            row = box.row(align=True); row.prop(s, "show_delighter_options", text="Show Delighter Options")
+            # Revealed Delighter options
+            sub = box.column(align=True)
+            if getattr(s, 'show_delighter_options', True):
+                sub.prop(s, "de_light_with_lightmap", text="Delight with Lightmap")
+                sub.prop(s, "divide_ao", text="Divide AO")
+                sub.prop(s, "divide_r", text="Divide R")
+                sub.prop(s, "divide_g", text="Divide G")
+                sub.prop(s, "divide_b", text="Divide B")
+                sub.prop(s, "invert_r", text="Invert R")
+                sub.prop(s, "invert_g", text="Invert G")
+                sub.prop(s, "invert_b", text="Invert B")
+                if getattr(s, 'de_light_with_lightmap', False):
+                    sub.prop(s, "divide_lightmap", text="Divide Lightmap")
+                    sub.prop(s, "lightmap_brightness", text="Lightmap Brightness")
+                    sub.prop(s, "lightmap_contrast", text="Lightmap Contrast")
             # Tiling controls
             row = box.row(align=True); row.prop(s, "tile_x", text="Tile X")
             if getattr(s, 'tile_x', False):
@@ -175,6 +207,9 @@ class VIVID_PT_texture_processing(Panel):
                 sub.prop(s, 'tile_y_threshold', text='Threshold')
                 sub.prop(s, 'tile_y_smoothness', text='Smoothness')
                 sub.prop(s, 'tile_y_contrast', text='Contrast')
+            # Move sharpen and save to release near bottom
+            row = box.row(align=True); row.prop(s, "sharpen", text="Sharpen")
+            row = box.row(align=True); row.prop(s, "save_only_release", text="Save only to Release")
         else:
             box.label(text="Light Removal settings not found.", icon='INFO')
         col = layout.column(align=True)
@@ -182,6 +217,9 @@ class VIVID_PT_texture_processing(Panel):
 
 _classes = (
     VIVID_PT_main_panel_asset,
+    VIVID_PT_import_source,
+    # New: Import Source panel at the very top
+    # defined below
     VIVID_PT_surface,
     VIVID_PT_uv_mapping,
     VIVID_PT_bake_textures,
@@ -195,6 +233,7 @@ def register():
         bpy.utils.register_class(c)
     # Scene UI properties
     from bpy.props import FloatProperty, EnumProperty, StringProperty, IntProperty
+    from bpy.props import BoolProperty
     if not hasattr(bpy.types.Scene, "vivid_surface_dim_x"):
         bpy.types.Scene.vivid_surface_dim_x = FloatProperty(
             name="Meters X",
@@ -233,6 +272,13 @@ def register():
             description="Path to a reference metadata JSON to load",
             subtype='FILE_PATH'
         )
+    # Import Source panel property
+    if not hasattr(bpy.types.Scene, "vivid_import_simplified_as_optimized"):
+        bpy.types.Scene.vivid_import_simplified_as_optimized = BoolProperty(
+            name="Import Simplified as Optimized",
+            description="If enabled, imported Simplified FBX will be renamed and placed under Optimized collection",
+            default=True,
+        )
 
 def unregister():
     for c in reversed(_classes):
@@ -241,6 +287,7 @@ def unregister():
         "vivid_surface_dim_x","vivid_surface_dim_y",
         "vivid_uv_udim_tiles","vivid_uv_pixel_margin","vivid_uv_texture_res",
         "vivid_metadata_reference_path",
+        "vivid_import_simplified_as_optimized",
     ):
         if hasattr(bpy.types.Scene, attr):
             delattr(bpy.types.Scene, attr)
