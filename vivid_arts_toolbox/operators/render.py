@@ -5,6 +5,8 @@ from mathutils import Vector
 from ..utils import resource_or_legacy
 from bpy.types import Operator
 
+BAKE_EXTS = (".png", ".tga", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp", ".webp")
+
 
 def _release_asset_dir(context):
     # Reuse logic from export_asset without importing to avoid circulars
@@ -133,6 +135,116 @@ def _set_switch_for_object(obj: bpy.types.Object, node_name: str, value: float):
         _set_node_switch(slot.material, node_name, value)
 
 
+def _append_or_get_render_material(render_blend_path: str, template_name: str = "Render") -> bpy.types.Material | None:
+    mat = bpy.data.materials.get(template_name)
+    if mat:
+        return mat
+    if not (render_blend_path and os.path.isfile(render_blend_path)):
+        return None
+    try:
+        with bpy.data.libraries.load(render_blend_path, link=False) as (data_from, data_to):
+            if template_name in (data_from.materials or []):
+                data_to.materials = [template_name]
+        return bpy.data.materials.get(template_name)
+    except Exception:
+        return None
+
+
+def _parse_udim_from_mat_name(name: str) -> str:
+    try:
+        parts = (name or "").split('_')
+        for token in reversed(parts):
+            if token.isdigit() and len(token) == 4 and int(token) >= 1001:
+                return token
+    except Exception:
+        pass
+    return '1001'
+
+
+def _scan_release_textures(release_dir: str) -> list[str]:
+    try:
+        return [os.path.join(release_dir, f) for f in os.listdir(release_dir)
+                if os.path.splitext(f)[1].lower() in BAKE_EXTS and os.path.isfile(os.path.join(release_dir, f))]
+    except Exception:
+        return []
+
+
+def _pick_texture_for(node_suffix: str, udim: str, files: list[str], preferred_prefixes: list[str]) -> str | None:
+    # Heuristic: prefer files whose stem starts with a preferred prefix (asset id, object), contains _UDIM_, and ends with suffix token
+    cand = []
+    low_suffix = node_suffix.lower()
+    for p in files:
+        stem = os.path.splitext(os.path.basename(p))[0]
+        low = stem.lower()
+        if f"_{udim}_" not in low:
+            continue
+        if not low.endswith(low_suffix) and not low.endswith(f"_{low_suffix}"):
+            # also allow suffix separated by underscore
+            continue
+        score = 0
+        for pref in preferred_prefixes:
+            if pref and low.startswith(pref.lower() + "_"):
+                score += 2
+        # prefer exact suffix match at end
+        if low.endswith(f"_{low_suffix}"):
+            score += 1
+        cand.append((score, p))
+    if not cand:
+        # fallback: accept any file with udim and suffix anywhere
+        for p in files:
+            low = os.path.splitext(os.path.basename(p))[0].lower()
+            if f"_{udim}_" in low and low_suffix in low:
+                cand.append((0, p))
+    if not cand:
+        return None
+    cand.sort(key=lambda t: t[0], reverse=True)
+    return cand[0][1]
+
+
+_RENDER_COLORSPACE = {
+    'BaseColor': 'sRGB',
+}
+
+
+def _wire_render_material_images(mat: bpy.types.Material, udim: str, release_dir: str, preferred_prefixes: list[str], report_fn=None):
+    if not mat or not mat.use_nodes:
+        return
+    files = _scan_release_textures(release_dir)
+    if not files:
+        return
+    nt = mat.node_tree
+    wired = []
+    for n in nt.nodes:
+        # Only consider image texture nodes; use node name as suffix key
+        if getattr(n, 'bl_idname', '') != 'ShaderNodeTexImage':
+            continue
+        suffix = n.name or n.label or ''
+        if not suffix:
+            continue
+        path = _pick_texture_for(suffix, udim, files, preferred_prefixes)
+        if not path:
+            continue
+        try:
+            img = bpy.data.images.load(bpy.path.abspath(path), check_existing=True)
+            try:
+                if getattr(img, 'packed_file', None):
+                    img.unpack(method='USE_ORIGINAL')
+            except Exception:
+                pass
+            n.image = img
+            cs = _RENDER_COLORSPACE.get(suffix, 'Non-Color')
+            try:
+                n.image.colorspace_settings.name = cs
+            except Exception:
+                pass
+            wired.append((suffix, os.path.basename(path)))
+        except Exception:
+            pass
+    if report_fn and wired:
+        msg = ", ".join([f"{suf} -> {fn}" for suf, fn in wired])
+        report_fn({'INFO'}, f"Render material '{mat.name}': wired {len(wired)} textures: {msg}")
+
+
 def _collect_cinema_targets():
     targets = []
     cinema = bpy.data.collections.get('Cinema')
@@ -187,13 +299,16 @@ class VIVID_OT_output_renders(Operator):
 
         if asset_type == 'Surface':
             # Surface flow: TextureBall and TexturePlane, no camera offsets or fitting
-            optimized = _find_optimized_obj()
-            mat = optimized.material_slots[0].material if (optimized and optimized.material_slots) else None
             asset_id = getattr(md, 'asset_id', '') if md else ''
             if not asset_id:
                 # fallback to folder name
                 blend_dir = os.path.dirname(bpy.data.filepath)
                 asset_id = os.path.basename(blend_dir)
+            # Ensure Render material template
+            render_mat_template = _append_or_get_render_material(render_blend, template_name="Render")
+            if not render_mat_template:
+                self.report({'ERROR'}, "Missing 'Render' material in Render.blend")
+                return {'CANCELLED'}
 
             def render_surface_scene(scene_name: str, suffix: str):
                 # Append requested scene
@@ -222,7 +337,7 @@ class VIVID_OT_output_renders(Operator):
                 prev_scene = context.window.scene
                 context.window.scene = scn
 
-                # Assign material to named object in the appended scene
+                # Assign temporary Render materials to named object in the appended scene
                 obj = None
                 for o in scn.objects:
                     if o.name == scene_name and o.type == 'MESH':
@@ -234,12 +349,28 @@ class VIVID_OT_output_renders(Operator):
                         if o.type == 'MESH':
                             obj = o
                             break
-                if obj and mat:
-                    try:
-                        obj.data.materials.clear()
-                        obj.data.materials.append(mat)
-                    except Exception:
-                        pass
+                # Build preferred prefixes for filename matching
+                preferred = [asset_id, obj.name]
+                # Snapshot original materials
+                original_mats = [slot.material for slot in (obj.material_slots or [])]
+                created = []
+                try:
+                    # For each existing material slot, create a copy of Render template and wire images per UDIM
+                    if obj:
+                        if not obj.data.materials:
+                            obj.data.materials.append(None)
+                        for i, orig in enumerate(original_mats or [None]):
+                            udim = _parse_udim_from_mat_name(orig.name if orig else obj.name)
+                            new_mat = render_mat_template.copy()
+                            new_mat.name = f"{(orig.name if orig else obj.name)}_Render"
+                            _wire_render_material_images(new_mat, udim, release_dir, preferred, report_fn=self.report)
+                            if i < len(obj.data.materials):
+                                obj.data.materials[i] = new_mat
+                            else:
+                                obj.data.materials.append(new_mat)
+                            created.append(new_mat)
+                except Exception:
+                    pass
 
                 # Setup render output
                 orig_fp = scn.render.filepath
@@ -259,6 +390,22 @@ class VIVID_OT_output_renders(Operator):
                     scn.render.image_settings.file_format = orig_fmt
                     scn.render.image_settings.color_mode = orig_col
                     scn.render.film_transparent = orig_transp
+                    # Restore original materials and cleanup
+                    try:
+                        if obj:
+                            for i, m in enumerate(original_mats):
+                                if i < len(obj.data.materials):
+                                    obj.data.materials[i] = m
+                            # Trim extra slots if any
+                            while len(obj.data.materials) > len(original_mats):
+                                obj.data.materials.pop(index=len(obj.data.materials)-1)
+                    except Exception:
+                        pass
+                    for m in created:
+                        try:
+                            bpy.data.materials.remove(m, do_unlink=True)
+                        except Exception:
+                            pass
                     try:
                         context.window.scene = prev_scene
                     except Exception:
@@ -338,6 +485,13 @@ class VIVID_OT_output_renders(Operator):
             context.window.scene = prev_scene
             return {'CANCELLED'}
 
+        # Ensure Render material template
+        render_mat_template = _append_or_get_render_material(render_blend, template_name="Render")
+        if not render_mat_template:
+            self.report({'ERROR'}, "Missing 'Render' material in Render.blend")
+            context.window.scene = prev_scene
+            return {'CANCELLED'}
+
         # Render settings
         orig_fp = render_scene.render.filepath
         orig_fmt = render_scene.render.image_settings.file_format
@@ -365,6 +519,33 @@ class VIVID_OT_output_renders(Operator):
                     base = base[:-7]
                 base = base.replace('_Cinema_Var', '_Var')
 
+                # Build preferred prefixes
+                md = getattr(context.scene, 'vivid_metadata', None)
+                asset_id = getattr(md, 'asset_id', '') if md else ''
+                if not asset_id:
+                    blend_dir = os.path.dirname(bpy.data.filepath)
+                    asset_id = os.path.basename(blend_dir)
+                preferred = [asset_id, obj.name]
+
+                # Apply temporary Render materials on the target object
+                original_mats = [slot.material for slot in (obj.material_slots or [])]
+                created = []
+                try:
+                    if not obj.data.materials:
+                        obj.data.materials.append(None)
+                    for i, orig in enumerate(original_mats or [None]):
+                        udim = _parse_udim_from_mat_name(orig.name if orig else obj.name)
+                        new_mat = render_mat_template.copy()
+                        new_mat.name = f"{(orig.name if orig else obj.name)}_Render"
+                        _wire_render_material_images(new_mat, udim, release_dir, preferred, report_fn=self.report)
+                        if i < len(obj.data.materials):
+                            obj.data.materials[i] = new_mat
+                        else:
+                            obj.data.materials.append(new_mat)
+                        created.append(new_mat)
+                except Exception:
+                    pass
+
                 _set_switch_for_object(obj, 'Switch_Clay', 0.0)
                 out_path = os.path.join(renders_dir, f"{base}_BeautyRender.png")
                 do_render(out_path)
@@ -387,12 +568,58 @@ class VIVID_OT_output_renders(Operator):
                             render_scene.collection.objects.link(lod0)
                         except RuntimeError:
                             pass
+                    # Apply temporary Render materials to LOD0 for wireframe pass too
+                    lod0_original = [slot.material for slot in (lod0.material_slots or [])]
+                    lod0_created = []
+                    try:
+                        if not lod0.data.materials:
+                            lod0.data.materials.append(None)
+                        for i, orig in enumerate(lod0_original or [None]):
+                            udim = _parse_udim_from_mat_name(orig.name if orig else lod0.name)
+                            new_mat = render_mat_template.copy()
+                            new_mat.name = f"{(orig.name if orig else lod0.name)}_Render"
+                            _wire_render_material_images(new_mat, udim, release_dir, preferred, report_fn=None)
+                            if i < len(lod0.data.materials):
+                                lod0.data.materials[i] = new_mat
+                            else:
+                                lod0.data.materials.append(new_mat)
+                            lod0_created.append(new_mat)
+                    except Exception:
+                        pass
                     _set_switch_for_object(lod0, 'Switch_Wireframe', 1.0)
                     out_path = os.path.join(renders_dir, f"{base}_WireframeRender.png")
                     do_render(out_path)
                     _set_switch_for_object(lod0, 'Switch_Wireframe', 0.0)
+                    # Restore and cleanup for LOD0
+                    try:
+                        for i, m in enumerate(lod0_original):
+                            if i < len(lod0.data.materials):
+                                lod0.data.materials[i] = m
+                        while len(lod0.data.materials) > len(lod0_original):
+                            lod0.data.materials.pop(index=len(lod0.data.materials)-1)
+                    except Exception:
+                        pass
+                    for m in lod0_created:
+                        try:
+                            bpy.data.materials.remove(m, do_unlink=True)
+                        except Exception:
+                            pass
                     try:
                         render_scene.collection.objects.unlink(lod0)
+                    except Exception:
+                        pass
+                # Restore and cleanup for main object
+                try:
+                    for i, m in enumerate(original_mats):
+                        if i < len(obj.data.materials):
+                            obj.data.materials[i] = m
+                    while len(obj.data.materials) > len(original_mats):
+                        obj.data.materials.pop(index=len(obj.data.materials)-1)
+                except Exception:
+                    pass
+                for m in created:
+                    try:
+                        bpy.data.materials.remove(m, do_unlink=True)
                     except Exception:
                         pass
                 try:

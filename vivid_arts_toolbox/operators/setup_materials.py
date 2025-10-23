@@ -282,6 +282,28 @@ class VIVID_OT_setup_materials(Operator):
             pass
 
         self.report({'INFO'}, "Materials set up/refreshed from BakeTextures")
+        # Set material preview render pass to Emission in 3D Viewports (best-effort)
+        try:
+            # Iterate all windows to robustly reach active screens
+            for win in bpy.context.window_manager.windows:
+                screen = win.screen
+                for area in screen.areas:
+                    if area.type != 'VIEW_3D':
+                        continue
+                    for space in area.spaces:
+                        if getattr(space, 'type', '') != 'VIEW_3D':
+                            continue
+                        # Ensure we're in material/renderer shading; then set pass
+                        try:
+                            space.shading.type = 'MATERIAL'
+                        except Exception:
+                            pass
+                        try:
+                            space.shading.render_pass = 'EMIT'
+                        except Exception:
+                            pass
+        except Exception:
+            pass
         return {'FINISHED'}
 
 
