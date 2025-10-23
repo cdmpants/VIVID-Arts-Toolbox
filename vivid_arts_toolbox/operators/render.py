@@ -289,7 +289,6 @@ class VIVID_OT_output_renders(Operator):
         before = set(sc.name for sc in bpy.data.scenes)
         want_name = biome_name
         chosen_name = None
-        import bpy
         try:
             with bpy.data.libraries.load(render_blend, link=False) as (data_from, data_to):
                 names = list(data_from.scenes)

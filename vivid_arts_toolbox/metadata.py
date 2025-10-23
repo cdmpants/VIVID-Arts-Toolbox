@@ -148,6 +148,10 @@ class VIVID_OT_export_metadata_json(Operator):
         if not s:
             self.report({'ERROR'}, 'Metadata settings missing')
             return {'CANCELLED'}
+        # Require saved .blend so we can use filename as the authoritative AssetID
+        if not bpy.data.filepath:
+            self.report({'ERROR'}, 'Save your .blend file before exporting metadata (needed to set AssetID).')
+            return {'CANCELLED'}
         base = _blend_basename_noext()
         out_dir = _blend_dir()
         out_path = os.path.join(out_dir, f"{base}_meta.json")
@@ -160,9 +164,16 @@ class VIVID_OT_export_metadata_json(Operator):
         tile_y_flag = bool(getattr(lr, 'tile_y', False)) if lr else False
         custom_lods = bool(getattr(getattr(context.scene, 'vivid_lod_props', None), 'custom_lods', False))
 
+        # Update display-only field to reflect the derived AssetID
+        try:
+            s.asset_id = base
+        except Exception:
+            pass
+
         data = {
             "Main": {
-                "AssetID": s.asset_id or base,
+                # Authoritative AssetID comes from the .blend filename
+                "AssetID": base,
                 "DisplayName": s.display_name or base,
                 "Description": getattr(s, 'description', "") or "",
                 "AssetType": s.asset_type,
@@ -214,7 +225,8 @@ class VIVID_OT_export_metadata_json(Operator):
                 "Cinema Polycount Target": int(getattr(s, 'cinema_polycount_target', 2000000)),
             }
         }
-        init_name_id = (s.asset_id or base).strip() or base
+        # Initialize JSON also follows the same AssetID
+        init_name_id = base
         init_out_path = os.path.join(out_dir, f"{init_name_id}_Initialize.json")
 
         try:
