@@ -160,6 +160,26 @@ def _set_images_by_baker(material: bpy.types.Material, baker_to_path: dict):
                 pass
         except Exception:
             pass
+    # Fallback: if AOWide node exists but no AOWide texture, reuse AO texture
+    try:
+        aowide_node = nt.nodes.get('AOWide')
+        if aowide_node and hasattr(aowide_node, 'image'):
+            has_aowide = 'AOWide' in baker_to_path and os.path.isfile(baker_to_path.get('AOWide', ''))
+            ao_path = baker_to_path.get('AO')
+            if (not has_aowide) and ao_path and os.path.isfile(ao_path):
+                img = bpy.data.images.load(bpy.path.abspath(ao_path), check_existing=True)
+                try:
+                    if getattr(img, 'packed_file', None):
+                        img.unpack(method='USE_ORIGINAL')
+                except Exception:
+                    pass
+                aowide_node.image = img
+                try:
+                    aowide_node.image.colorspace_settings.name = _COLORSPACE.get('AOWide', 'Non-Color')
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
 
 class VIVID_OT_setup_materials(Operator):

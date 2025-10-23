@@ -66,6 +66,22 @@ class VIVID_PT_bake_textures(Panel):
             row = box.row(align=True); row.prop(s, "setup_material",      text="Setup Material")
             row = box.row(align=True); row.prop(s, "bake_resolution",     text="Bake Resolution")
             row = box.row(align=True); row.prop(s, "engine",              text="Engine")
+            # Custom HighPoly override dir
+            row = box.row(align=True); row.prop(s, "custom_highpoly_dir",  text="Custom HighPoly")
+            # AO slider exposed from AO baker (secondary.max_distance)
+            row = box.row(align=True); row.prop(s, "ao_secondary_max_distance", text="AO Max Distance")
+            # Additional bakers (hidden by default)
+            box.separator()
+            row = box.row(align=True); row.prop(s, "show_additional_bakers", text="Show Additional Bakers")
+            if getattr(s, 'show_additional_bakers', False):
+                sub = box.column(align=True)
+                sub.prop(s, "enable_displacement", text="Displacement")
+                sub.prop(s, "enable_aowide", text="AOWide")
+                sub.prop(s, "enable_normalos", text="NormalOS")
+                sub.prop(s, "enable_thickness", text="Thickness")
+                sub.prop(s, "enable_curvature", text="Curvature")
+                sub.prop(s, "enable_bentnormalos", text="BentNormalOS")
+                sub.prop(s, "enable_position", text="Position")
         else:
             box.label(text="Designer bake settings not found (scene.vivid_designer_bake).", icon='INFO')
         col = layout.column(align=True)

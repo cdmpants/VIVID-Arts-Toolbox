@@ -7,7 +7,7 @@ import time
 import subprocess
 from pathlib import Path
 from bpy.types import Operator, PropertyGroup
-from bpy.props import BoolProperty, PointerProperty, EnumProperty, StringProperty
+from bpy.props import BoolProperty, PointerProperty, EnumProperty, StringProperty, FloatProperty
 
 # ------------------------------------------------------------
 # Defaults & Paths
@@ -205,7 +205,7 @@ def _apply_resolution(data, res_px):
             if isinstance(baker.get("commonOutputParameters"), dict):
                 _apply_resolution_anywhere(baker["commonOutputParameters"], res_px)
 
-def _load_and_patch_json(src_json, files_map, output_dir, dest_json, res_px):
+def _load_and_patch_json(src_json, files_map, output_dir, dest_json, res_px, settings=None):
     with open(src_json, "r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -215,6 +215,40 @@ def _load_and_patch_json(src_json, files_map, output_dir, dest_json, res_px):
     # Resolution
     if res_px:
         _apply_resolution(data, res_px)
+
+    # Apply baker selections and AO params when provided
+    if settings is not None:
+        try:
+            toggles = {
+                'Displacement': bool(getattr(settings, 'enable_displacement', True)),
+                'AOWide':       bool(getattr(settings, 'enable_aowide', True)),
+                'NormalOS':     bool(getattr(settings, 'enable_normalos', True)),
+                'Thickness':    bool(getattr(settings, 'enable_thickness', False)),
+                'Curvature':    bool(getattr(settings, 'enable_curvature', False)),
+                'BentNormalOS': bool(getattr(settings, 'enable_bentnormalos', False)),
+                'Position':     bool(getattr(settings, 'enable_position', False)),
+            }
+            ao_max = float(getattr(settings, 'ao_secondary_max_distance', 0.04))
+        except Exception:
+            toggles = {}
+            ao_max = None
+
+        for baker in data.get('bakers', []) or []:
+            if not isinstance(baker, dict):
+                continue
+            ident = baker.get('identifier') or ''
+            params = baker.get('parameters')
+            if not isinstance(params, dict):
+                continue
+            # Toggle known optional bakers; force others on
+            if ident in toggles:
+                params['is_selected'] = bool(toggles[ident])
+            else:
+                # Always keep required/default bakers on
+                params['is_selected'] = True
+            # AO slider override
+            if ident == 'AO' and ao_max is not None:
+                params['secondary.max_distance'] = ao_max
 
     # Save generated JSON
     with open(dest_json, "w", encoding="utf-8") as f:
@@ -604,6 +638,11 @@ class VIVID_DesignerBakeSettings(PropertyGroup):
         description="Create/assign a Delighter-based material on the _Optimized object using baked textures",
         default=True
     )
+    __annotations__['ao_secondary_max_distance'] = FloatProperty(
+        name="AO Max Distance",
+        description="Controls AO baker secondary.max_distance in meters",
+        default=0.04, min=0.0, soft_max=1.0, step=0.01, precision=4
+    )
     __annotations__['bake_resolution'] = EnumProperty(
         name="Bake Resolution",
         description="Target output resolution for Designer bakers",
@@ -621,6 +660,48 @@ class VIVID_DesignerBakeSettings(PropertyGroup):
         description="Optional folder to look for HighPoly FBX and textures instead of //BakeMesh",
         subtype='DIR_PATH',
         default=""
+    )
+    # Additional bakers UI toggle
+    __annotations__['show_additional_bakers'] = BoolProperty(
+        name="Show Additional Bakers",
+        description="Reveal additional optional bakers to include/exclude",
+        default=False
+    )
+    # Per-baker enable flags
+    __annotations__['enable_displacement'] = BoolProperty(
+        name="Displacement",
+        description="Enable Displacement baker",
+        default=True
+    )
+    __annotations__['enable_aowide'] = BoolProperty(
+        name="AOWide",
+        description="Enable AOWide baker",
+        default=True
+    )
+    __annotations__['enable_normalos'] = BoolProperty(
+        name="NormalOS",
+        description="Enable world-space NormalOS baker",
+        default=True
+    )
+    __annotations__['enable_thickness'] = BoolProperty(
+        name="Thickness",
+        description="Enable Thickness baker",
+        default=False
+    )
+    __annotations__['enable_curvature'] = BoolProperty(
+        name="Curvature",
+        description="Enable Curvature baker",
+        default=False
+    )
+    __annotations__['enable_bentnormalos'] = BoolProperty(
+        name="BentNormalOS",
+        description="Enable world-space BentNormalOS baker",
+        default=False
+    )
+    __annotations__['enable_position'] = BoolProperty(
+        name="Position",
+        description="Enable Position baker",
+        default=False
     )
 
 # ------------------------------------------------------------
@@ -714,7 +795,7 @@ class VIVID_OT_bake_designer(Operator):
                 files_local['high'] = hp
                 log_path = os.path.join(bake_mesh, f"bake_{part_token}.log")
                 gen_json = os.path.join(bake_mesh, f"_generated_bake_{part_token}.json")
-                _load_and_patch_json(main_json, files_local, out_dir, gen_json, res_px)
+                _load_and_patch_json(main_json, files_local, out_dir, gen_json, res_px, settings=settings)
                 try:
                     udim_tiles = _udim_tiles_from_object(opt_obj) if opt_obj else []
                     if udim_tiles and (len(udim_tiles) > 1 or udim_tiles != [(0, 0)]):
@@ -731,7 +812,7 @@ class VIVID_OT_bake_designer(Operator):
             os.makedirs(part_dir, exist_ok=True)
             log_path = os.path.join(bake_mesh, "bake_designer.log")
             gen_main = os.path.join(bake_mesh, "_generated_bake_preset.json")
-            _load_and_patch_json(main_json, files, part_dir, gen_main, res_px)
+            _load_and_patch_json(main_json, files, part_dir, gen_main, res_px, settings=settings)
 
             # UDIM detection from active *_Optimized object and JSON patching (uv_tiles, is_udim)
             try:
