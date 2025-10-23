@@ -176,10 +176,18 @@ class VIVID_OT_setup_materials(Operator):
         if not os.path.isdir(bake_tex):
             self.report({'ERROR'}, f"Missing BakeTextures folder: {bake_tex}")
             return {'CANCELLED'}
-        # Gather textures for this object's name
-        tex_map = _gather_textures_for_object(bake_tex, obj.name)
+        # Gather textures for this object's name, preferring Part1 subfolder
+        part1_dir = os.path.join(bake_tex, "Part1")
+        if os.path.isdir(part1_dir):
+            tex_map = _gather_textures_for_object(part1_dir, obj.name)
+        else:
+            tex_map = _gather_textures_for_object(bake_tex, obj.name)
         if not tex_map:
-            self.report({'WARNING'}, "No baked textures found that match the object name")
+            # Fallback: try root even if Part1 exists but empty
+            if os.path.isdir(part1_dir):
+                tex_map = _gather_textures_for_object(bake_tex, obj.name)
+        if not tex_map:
+            self.report({'WARNING'}, "No baked textures found that match the object name (checked Part1 and root)")
         # Determine if current materials are conformant
         desired_names = {f"{obj.name}_{u}" for u in tex_map.keys()} or {f"{obj.name}_1001"}
         existing = [m.name for m in obj.data.materials if m]
@@ -224,6 +232,34 @@ class VIVID_OT_setup_materials(Operator):
                 bpy.ops.vivid.udim_material_assignment()
             except Exception:
                 pass
+
+        # Also build reference materials for Part# subfolders, but do not assign them to the object
+        try:
+            for entry in sorted(os.listdir(bake_tex)):
+                part_dir = os.path.join(bake_tex, entry)
+                if not os.path.isdir(part_dir):
+                    continue
+                # Accept folder names like Part1, Part2, Part10 ...
+                if not (entry.startswith('Part') and entry[4:].isdigit()):
+                    continue
+                part_token = entry  # e.g., Part1
+                part_tex_map = _gather_textures_for_object(part_dir, obj.name)
+                if not part_tex_map:
+                    continue
+                # For each UDIM, create/update a material named "<object>_<Part#>_<UDIM>"
+                template = _append_or_get_template("Delighter")
+                if not template:
+                    continue
+                for udim in sorted(part_tex_map.keys() or ['1001']):
+                    mat_name = f"{obj.name}_{part_token}_{udim}"
+                    mat = _clone_material_from_template(mat_name, template)
+                    _set_images_by_baker(mat, part_tex_map.get(udim, {}))
+                    try:
+                        mat.use_fake_user = True
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         self.report({'INFO'}, "Materials set up/refreshed from BakeTextures")
         return {'FINISHED'}

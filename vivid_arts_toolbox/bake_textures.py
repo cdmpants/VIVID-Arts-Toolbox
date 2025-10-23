@@ -275,22 +275,53 @@ def _apply_udim_to_json(json_path, udim_tiles):
 # Multi-highpoly helpers
 # ------------------------------------------------------------
 def _rename_bake_outputs_with_part(output_dir, part_token):
+    """
+    Normalize Part# filenames to the new convention:
+      (objectname)_(Part#)_(udim)_(bakername)
+
+    Handles these cases generically (no hard-coded baker names):
+    - Old style: (objectname)_(udim)_(Part#)_(bakername)  → move Part# before UDIM
+    - No part token: (objectname)_(udim)_(bakername)      → insert Part# before UDIM
+    - Part token already in object segment (anywhere)     → ensure exactly one Part# right before UDIM
+    """
     try:
         if not os.path.isdir(output_dir):
             return
-        tokens = ["_BaseColorTransfer", "_DLBC", "_AOWide", "_DLAO", "_BentNormalOS", "_DLBN", "_NormalOS", "_Normal", "_Normals"]
+
+        def is_udim(tok: str) -> bool:
+            return tok.isdigit() and len(tok) == 4 and int(tok) >= 1001
+
         for fn in os.listdir(output_dir):
             src = os.path.join(output_dir, fn)
             if not os.path.isfile(src):
                 continue
             name, ext = os.path.splitext(fn)
-            new_name = None
-            for t in tokens:
-                idx = name.find(t)
-                if idx > 0:
-                    new_name = name[:idx] + f"_{part_token}" + name[idx:] + ext
-                    break
-            if new_name and new_name != fn:
+            parts = name.split('_')
+            if len(parts) < 3:
+                continue
+
+            # Case A: ... _ <udim> _ <baker>
+            if is_udim(parts[-2]):
+                baker = parts[-1]
+                udim = parts[-2]
+                obj_tokens = parts[:-2]
+                # Remove any existing part token in obj tokens
+                obj_tokens = [t for t in obj_tokens if t != part_token]
+                new_parts = obj_tokens + [part_token, udim, baker]
+                new_name = '_'.join(new_parts) + ext
+            # Case B: ... _ <Part#> _ <baker> with udim at -3 (legacy)
+            elif len(parts) >= 4 and parts[-2] == part_token and is_udim(parts[-3]):
+                baker = parts[-1]
+                udim = parts[-3]
+                obj_tokens = parts[:-3]
+                obj_tokens = [t for t in obj_tokens if t != part_token]
+                new_parts = obj_tokens + [part_token, udim, baker]
+                new_name = '_'.join(new_parts) + ext
+            else:
+                # Unrecognized; skip
+                continue
+
+            if new_name != fn:
                 dst = os.path.join(output_dir, new_name)
                 try:
                     os.replace(src, dst)
@@ -570,7 +601,7 @@ class VIVID_DesignerBakeSettings(PropertyGroup):
     )
     __annotations__['setup_material'] = BoolProperty(
         name="Setup Material",
-        description="Create/assign a material on the _Optimized object using baked DLBC/Normal maps",
+        description="Create/assign a Delighter-based material on the _Optimized object using baked textures",
         default=True
     )
     __annotations__['bake_resolution'] = EnumProperty(
@@ -694,10 +725,13 @@ class VIVID_OT_bake_designer(Operator):
                 rc_total = rc_total or rc
                 _rename_bake_outputs_with_part(out_dir, part_token)
         else:
+            # Always bake into Part1 subfolder and include Part1 in filenames
             # Patch + run a single JSON
+            part_dir = os.path.join(bake_tex, "Part1")
+            os.makedirs(part_dir, exist_ok=True)
             log_path = os.path.join(bake_mesh, "bake_designer.log")
             gen_main = os.path.join(bake_mesh, "_generated_bake_preset.json")
-            _load_and_patch_json(main_json, files, bake_tex, gen_main, res_px)
+            _load_and_patch_json(main_json, files, part_dir, gen_main, res_px)
 
             # UDIM detection from active *_Optimized object and JSON patching (uv_tiles, is_udim)
             try:
@@ -708,6 +742,8 @@ class VIVID_OT_bake_designer(Operator):
             except Exception:
                 pass
             rc_total = _run_baker(exe_path, gen_main, log_path, cwd=bake_mesh, use_cpu=use_cpu)
+            # Normalize filenames to (object)_(Part1)_(udim)_(baker)
+            _rename_bake_outputs_with_part(part_dir, "Part1")
 
         # --- Stop timer ---
         duration = time.time() - start_time
