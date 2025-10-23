@@ -445,10 +445,8 @@ def register():
     VIVID_Metadata.date_captured = StringProperty(name="Date Captured")
     VIVID_Metadata.version = StringProperty(name="Version", description="Version string", default="1.0")
     # New fields
-    def _items_set():
-        seq = _OPTIONS.get('Set', ["None"])
-        return [(v, v, "") for v in (seq if seq else ["None"]) ]
-    VIVID_Metadata.set = EnumProperty(name="Set", items=_items_set(), default=_OPTIONS.get('Set', ["None"])[0] if _OPTIONS.get('Set') else "None")
+    # "Set" is now a free text field rather than a dropdown
+    VIVID_Metadata.set = StringProperty(name="Set", description="Arbitrary set or collection name")
     VIVID_Metadata.released = BoolProperty(name="Released", default=True)
 
     VIVID_Metadata.poly_cinema = StringProperty(name="Cinema")

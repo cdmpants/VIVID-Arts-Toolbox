@@ -44,13 +44,27 @@ class VIVID_OT_create_cinema_variant(bpy.types.Operator):
                 col.objects.unlink(o)
             new_coll.objects.link(o)
 
-        # Rename the _Cinema object to _Cinema_Var# and data as well
+    # Rename the Cinema object(s) inside the variant collection to have the Var# suffix
+    # Handle names like "Cinema", "Cinema.001", "<base>_Cinema" and duplicates with .###
+        pat_tail = re.compile(r"(.*)(_Cinema)(?:\.\d+)?$")
         for o in dup_objs:
-            if o.type == 'MESH' and o.name.endswith("_Cinema"):
-                base = o.name[:-len("_Cinema")]
-                new_name = f"{base}_Cinema_Var{next_idx}"
+            if o.type != 'MESH':
+                continue
+            name = o.name
+            new_name = None
+            if name == "Cinema" or name.startswith("Cinema."):
+                new_name = f"Cinema_Var{next_idx}"
+            else:
+                m = pat_tail.match(name)
+                if m:
+                    base = m.group(1)
+                    new_name = f"{base}_Cinema_Var{next_idx}"
+            if new_name:
                 o.name = new_name
-                o.data.name = new_name
+                try:
+                    o.data.name = new_name
+                except Exception:
+                    pass
 
         self.report({'INFO'}, f"Created variant collection '{var_name}'.")
         return {'FINISHED'}
