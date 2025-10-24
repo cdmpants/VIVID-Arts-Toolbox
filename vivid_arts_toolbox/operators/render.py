@@ -161,23 +161,32 @@ def _parse_udim_from_mat_name(name: str) -> str:
     return '1001'
 
 
-def _scan_release_textures(release_dir: str) -> list[str]:
-    try:
-        return [os.path.join(release_dir, f) for f in os.listdir(release_dir)
-                if os.path.splitext(f)[1].lower() in BAKE_EXTS and os.path.isfile(os.path.join(release_dir, f))]
-    except Exception:
-        return []
+def _scan_release_textures(dirs: list[str] | str) -> list[str]:
+    # Non-recursive scan across one or more directories (Release root and/or Release/Textures)
+    paths = []
+    search_dirs = dirs if isinstance(dirs, (list, tuple)) else [dirs]
+    for d in search_dirs:
+        try:
+            for f in os.listdir(d):
+                if os.path.splitext(f)[1].lower() in BAKE_EXTS:
+                    p = os.path.join(d, f)
+                    if os.path.isfile(p):
+                        paths.append(p)
+        except Exception:
+            continue
+    return paths
 
 
-def _pick_texture_for(node_suffix: str, udim: str, files: list[str], preferred_prefixes: list[str]) -> str | None:
+def _pick_texture_for(node_suffix: str, udim: str | None, files: list[str], preferred_prefixes: list[str], require_udim: bool = True) -> str | None:
     # Heuristic: prefer files whose stem starts with a preferred prefix (asset id, object), contains _UDIM_, and ends with suffix token
     cand = []
     low_suffix = node_suffix.lower()
     for p in files:
         stem = os.path.splitext(os.path.basename(p))[0]
         low = stem.lower()
-        if f"_{udim}_" not in low:
-            continue
+        if require_udim:
+            if not (udim and f"_{udim}_" in low):
+                continue
         if not low.endswith(low_suffix) and not low.endswith(f"_{low_suffix}"):
             # also allow suffix separated by underscore
             continue
@@ -193,7 +202,7 @@ def _pick_texture_for(node_suffix: str, udim: str, files: list[str], preferred_p
         # fallback: accept any file with udim and suffix anywhere
         for p in files:
             low = os.path.splitext(os.path.basename(p))[0].lower()
-            if f"_{udim}_" in low and low_suffix in low:
+            if ((not require_udim) or (udim and f"_{udim}_" in low)) and (low_suffix in low):
                 cand.append((0, p))
     if not cand:
         return None
@@ -206,10 +215,10 @@ _RENDER_COLORSPACE = {
 }
 
 
-def _wire_render_material_images(mat: bpy.types.Material, udim: str, release_dir: str, preferred_prefixes: list[str], report_fn=None):
+def _wire_render_material_images(mat: bpy.types.Material, udim: str | None, search_dirs: list[str] | str, preferred_prefixes: list[str], report_fn=None, require_udim: bool = True):
     if not mat or not mat.use_nodes:
         return
-    files = _scan_release_textures(release_dir)
+    files = _scan_release_textures(search_dirs)
     if not files:
         return
     nt = mat.node_tree
@@ -221,7 +230,7 @@ def _wire_render_material_images(mat: bpy.types.Material, udim: str, release_dir
         suffix = n.name or n.label or ''
         if not suffix:
             continue
-        path = _pick_texture_for(suffix, udim, files, preferred_prefixes)
+        path = _pick_texture_for(suffix, udim, files, preferred_prefixes, require_udim=require_udim)
         if not path:
             continue
         try:
@@ -310,6 +319,39 @@ class VIVID_OT_output_renders(Operator):
                 self.report({'ERROR'}, "Missing 'Render' material in Render.blend")
                 return {'CANCELLED'}
 
+            # Textures can live under Release root or under Release/Textures (non-recursive)
+            textures_dir = os.path.join(release_dir, 'Textures')
+            search_dirs = [release_dir, textures_dir]
+
+            def _find_displacement_texture(search_dirs: list[str], asset_prefix: str) -> str | None:
+                try:
+                    files = _scan_release_textures(search_dirs)
+                except Exception:
+                    files = []
+                if not files:
+                    return None
+                cand = []
+                for p in files:
+                    name = os.path.splitext(os.path.basename(p))[0]
+                    low = name.lower()
+                    score = 0
+                    if asset_prefix and low.startswith(asset_prefix.lower() + '_'):
+                        score += 2
+                    # Strong match: contains 'displacement'
+                    if 'displacement' in low:
+                        score += 3
+                        if low.endswith('_displacement') or low.endswith('-displacement'):
+                            score += 1
+                    # Secondary: sometimes height is used
+                    if 'height' in low:
+                        score += 1
+                    if score > 0:
+                        cand.append((score, p))
+                if not cand:
+                    return None
+                cand.sort(key=lambda t: t[0], reverse=True)
+                return cand[0][1]
+
             def render_surface_scene(scene_name: str, suffix: str):
                 # Append requested scene
                 before = set(sc.name for sc in bpy.data.scenes)
@@ -355,15 +397,51 @@ class VIVID_OT_output_renders(Operator):
                 original_mats = [slot.material for slot in (obj.material_slots or [])]
                 created = []
                 try:
+                    # Surface Displacement: wire "DisplacementTexture" texture datablock to asset Displacement image if available.
+                    disp_path = _find_displacement_texture(search_dirs, asset_id)
+                    # Locate or create the DisplacementTexture datablock
+                    disp_tex = bpy.data.textures.get('DisplacementTexture')
+                    if disp_path:
+                        if disp_tex is None:
+                            try:
+                                disp_tex = bpy.data.textures.new('DisplacementTexture', type='IMAGE')
+                            except Exception:
+                                disp_tex = None
+                        try:
+                            img = bpy.data.images.load(disp_path, check_existing=True)
+                        except Exception:
+                            img = None
+                        if disp_tex and img:
+                            try:
+                                disp_tex.image = img
+                            except Exception:
+                                pass
+                            # Ensure Displace modifier uses this texture and is enabled for render
+                            for m in obj.modifiers:
+                                if m.type == 'DISPLACE':
+                                    try:
+                                        m.texture = disp_tex
+                                        m.show_render = True
+                                    except Exception:
+                                        pass
+                    else:
+                        # No displacement: disable Displace modifier during render
+                        for m in obj.modifiers:
+                            if m.type == 'DISPLACE':
+                                try:
+                                    m.show_render = False
+                                except Exception:
+                                    pass
                     # For each existing material slot, create a copy of Render template and wire images per UDIM
                     if obj:
                         if not obj.data.materials:
                             obj.data.materials.append(None)
                         for i, orig in enumerate(original_mats or [None]):
-                            udim = _parse_udim_from_mat_name(orig.name if orig else obj.name)
+                            # Surfaces do not use UDIMs: pass udim=None and require_udim=False
+                            udim = None
                             new_mat = render_mat_template.copy()
                             new_mat.name = f"{(orig.name if orig else obj.name)}_Render"
-                            _wire_render_material_images(new_mat, udim, release_dir, preferred, report_fn=self.report)
+                            _wire_render_material_images(new_mat, udim, search_dirs, preferred, report_fn=self.report, require_udim=False)
                             if i < len(obj.data.materials):
                                 obj.data.materials[i] = new_mat
                             else:
@@ -419,7 +497,7 @@ class VIVID_OT_output_renders(Operator):
             ok1 = render_surface_scene('TextureBall', 'Ball_BeautyRender')
             ok2 = render_surface_scene('TexturePlane', 'Plane_BeautyRender')
 
-            # Downscale release textures to 1024 JPG into Renders folder
+            # Downscale Release root and Release/Textures to 1024 JPGs (best-effort)
             self._downscale_release_textures_to_jpg(context, release_dir, renders_dir)
 
             if not (ok1 and ok2):
@@ -427,7 +505,7 @@ class VIVID_OT_output_renders(Operator):
             self.report({'INFO'}, f"Surface renders saved to: {renders_dir}")
             return {'FINISHED'}
 
-        # Model flow (existing), but save into Renders subfolder
+    # Model flow (existing), but save into Renders subfolder
         # Choose biome scene (fallback to Generic)
         s = md
         biome_name = getattr(s, 'biome', 'Generic') if s else 'Generic'
@@ -526,6 +604,9 @@ class VIVID_OT_output_renders(Operator):
                     blend_dir = os.path.dirname(bpy.data.filepath)
                     asset_id = os.path.basename(blend_dir)
                 preferred = [asset_id, obj.name]
+                # Textures can live under Release root or Release/Textures
+                textures_dir = os.path.join(release_dir, 'Textures')
+                search_dirs = [release_dir, textures_dir]
 
                 # Apply temporary Render materials on the target object
                 original_mats = [slot.material for slot in (obj.material_slots or [])]
@@ -537,7 +618,7 @@ class VIVID_OT_output_renders(Operator):
                         udim = _parse_udim_from_mat_name(orig.name if orig else obj.name)
                         new_mat = render_mat_template.copy()
                         new_mat.name = f"{(orig.name if orig else obj.name)}_Render"
-                        _wire_render_material_images(new_mat, udim, release_dir, preferred, report_fn=self.report)
+                        _wire_render_material_images(new_mat, udim, search_dirs, preferred, report_fn=self.report)
                         if i < len(obj.data.materials):
                             obj.data.materials[i] = new_mat
                         else:
@@ -578,7 +659,7 @@ class VIVID_OT_output_renders(Operator):
                             udim = _parse_udim_from_mat_name(orig.name if orig else lod0.name)
                             new_mat = render_mat_template.copy()
                             new_mat.name = f"{(orig.name if orig else lod0.name)}_Render"
-                            _wire_render_material_images(new_mat, udim, release_dir, preferred, report_fn=None)
+                            _wire_render_material_images(new_mat, udim, search_dirs, preferred, report_fn=None)
                             if i < len(lod0.data.materials):
                                 lod0.data.materials[i] = new_mat
                             else:
@@ -643,21 +724,29 @@ class VIVID_OT_output_renders(Operator):
             except Exception:
                 pass
 
-        # Downscale release textures to 1024 JPG into Renders folder (best-effort)
+        # Downscale Release/Textures to 1024 JPG into Renders folder (best-effort)
         self._downscale_release_textures_to_jpg(context, release_dir, renders_dir)
 
         self.report({'INFO'}, f"Renders saved to: {renders_dir}")
         return {'FINISHED'}
 
     def _downscale_release_textures_to_jpg(self, context, release_dir: str, renders_dir: str):
-        # Best-effort: iterate images in release root (non-recursive), scale to 1024x1024 and save as JPG in Renders
+        # Best-effort: iterate images in Release root and Release/Textures (non-recursive), scale to 1024x1024 and save as JPG in Renders
         exts = {'.png', '.tga', '.tif', '.tiff', '.exr', '.jpg', '.jpeg'}
-        files = []
-        try:
-            files = [f for f in os.listdir(release_dir) if os.path.splitext(f)[1].lower() in exts]
-        except Exception:
-            return
-        if not files:
+        textures_dir = os.path.join(release_dir, 'Textures')
+        file_paths = []
+        for d in [release_dir, textures_dir]:
+            try:
+                for f in os.listdir(d):
+                    if os.path.splitext(f)[1].lower() in exts:
+                        p = os.path.join(d, f)
+                        if os.path.isfile(p):
+                            file_paths.append(p)
+            except Exception:
+                continue
+        # De-duplicate identical filenames across the two roots by full path
+        file_paths = list(dict.fromkeys(file_paths))
+        if not file_paths:
             return
         scene = context.scene
         # Save original settings
@@ -667,9 +756,8 @@ class VIVID_OT_output_renders(Operator):
         try:
             scene.render.image_settings.file_format = 'JPEG'
             scene.render.image_settings.color_mode = 'RGB'
-            for f in files:
-                src_path = os.path.join(release_dir, f)
-                stem, _ = os.path.splitext(f)
+            for src_path in file_paths:
+                stem, _ = os.path.splitext(os.path.basename(src_path))
                 dst_path = os.path.join(renders_dir, f"{stem}_1024.jpg")
                 try:
                     img = bpy.data.images.load(src_path, check_existing=True)
