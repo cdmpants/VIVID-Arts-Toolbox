@@ -753,11 +753,39 @@ class VIVID_OT_output_renders(Operator):
         orig_fmt = scene.render.image_settings.file_format
         orig_col = scene.render.image_settings.color_mode
         orig_fp = scene.render.filepath
+        # Color management: force Standard view transform for previews
+        vs = scene.view_settings
+        ds = scene.display_settings
+        prev_view = getattr(vs, 'view_transform', None)
+        prev_look = getattr(vs, 'look', None)
+        prev_expo = getattr(vs, 'exposure', None)
+        prev_gamma = getattr(vs, 'gamma', None)
+        prev_display = getattr(ds, 'display_device', None)
         try:
             scene.render.image_settings.file_format = 'JPEG'
             scene.render.image_settings.color_mode = 'RGB'
+            try:
+                vs.view_transform = 'Standard'
+                vs.look = 'None'
+                vs.exposure = 0.0
+                vs.gamma = 1.0
+            except Exception:
+                pass
+            try:
+                ds.display_device = 'sRGB'
+            except Exception:
+                pass
             for src_path in file_paths:
                 stem, _ = os.path.splitext(os.path.basename(src_path))
+                low = stem.lower()
+                # Use linear (Raw) view transform for Displacement/Height previews; Standard for others
+                try:
+                    if ('displacement' in low) or low.endswith('_disp') or ('height' in low):
+                        vs.view_transform = 'Raw'
+                    else:
+                        vs.view_transform = 'Standard'
+                except Exception:
+                    pass
                 dst_path = os.path.join(renders_dir, f"{stem}_1024.jpg")
                 try:
                     img = bpy.data.images.load(src_path, check_existing=True)
@@ -779,6 +807,20 @@ class VIVID_OT_output_renders(Operator):
             scene.render.image_settings.file_format = orig_fmt
             scene.render.image_settings.color_mode = orig_col
             scene.render.filepath = orig_fp
+            # Restore color management
+            try:
+                if prev_view is not None:
+                    vs.view_transform = prev_view
+                if prev_look is not None:
+                    vs.look = prev_look
+                if prev_expo is not None:
+                    vs.exposure = prev_expo
+                if prev_gamma is not None:
+                    vs.gamma = prev_gamma
+                if prev_display is not None:
+                    ds.display_device = prev_display
+            except Exception:
+                pass
 
 
 def register():
