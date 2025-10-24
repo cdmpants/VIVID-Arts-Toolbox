@@ -154,7 +154,6 @@ class VIVID_OT_export_metadata_json(Operator):
             return {'CANCELLED'}
         base = _blend_basename_noext()
         out_dir = _blend_dir()
-        out_path = os.path.join(out_dir, f"{base}_meta.json")
 
         now = datetime.datetime.now().strftime('%m/%d/%Y %H:%M:%S')
         variant_count = _count_model_variants()
@@ -252,10 +251,7 @@ class VIVID_OT_export_metadata_json(Operator):
         init_out_path = os.path.join(out_dir, f"{init_name_id}_Initialize.json")
 
         try:
-            # Write Metadata next to blend
-            with open(out_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
-            # Also write to Release mirror for Metadata only
+            # Write Metadata to Release mirror ONLY (single source of truth)
             rel_dir = _release_mirror_dir(context)
             os.makedirs(rel_dir, exist_ok=True)
             rel_path = os.path.join(rel_dir, f"{base}_meta.json")
@@ -267,7 +263,7 @@ class VIVID_OT_export_metadata_json(Operator):
         except Exception as e:
             self.report({'ERROR'}, f'Failed to write JSONs: {e}')
             return {'CANCELLED'}
-        self.report({'INFO'}, f'Exported: {out_path} and {init_out_path}')
+        self.report({'INFO'}, f'Exported: {rel_path} and {init_out_path}')
         return {'FINISHED'}
 
 
@@ -338,13 +334,23 @@ class VIVID_OT_reload_local_json(Operator):
     def execute(self, context):
         base = _blend_basename_noext()
         in_dir = _blend_dir()
-        meta_path = os.path.join(in_dir, f"{base}_meta.json")
+        meta_local_path = os.path.join(in_dir, f"{base}_meta.json")
+        # Prefer local Metadata JSON; fall back to Release mirror if not present
+        data = None
         init_data = None
-        try:
-            with open(meta_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-        except Exception as e:
-            self.report({'ERROR'}, f'Failed to read Metadata JSON: {e}')
+        last_err = None
+        for meta_path in (meta_local_path, os.path.join(_release_mirror_dir(context), f"{base}_meta.json")):
+            try:
+                if not os.path.exists(meta_path):
+                    continue
+                with open(meta_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                break
+            except Exception as e:
+                last_err = e
+                continue
+        if data is None:
+            self.report({'ERROR'}, f'Failed to read Metadata JSON from local or Release: {last_err}')
             return {'CANCELLED'}
         s = getattr(context.scene, 'vivid_metadata', None)
         if not s:

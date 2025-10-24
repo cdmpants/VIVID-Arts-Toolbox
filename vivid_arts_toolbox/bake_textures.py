@@ -7,6 +7,7 @@ import time
 import subprocess
 import shutil
 from pathlib import Path
+import re
 from bpy.types import Operator, PropertyGroup
 from bpy.props import BoolProperty, PointerProperty, EnumProperty, StringProperty, FloatProperty
 
@@ -70,18 +71,46 @@ def _glob_one(patterns, directory):
     cands.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return str(cands[0])
 
+def _diffuse_for_high(high_path: str, directory: str):
+    """Find a diffuse/albedo image matching a HighPoly base name and allowing tokens like u0_v0 or 1001
+    between the base and the map name. Returns latest by mtime or None."""
+    try:
+        if not high_path:
+            return None
+        base = Path(high_path).stem  # e.g., KAT_Cliff_Short_01_HighPoly
+        exts = ["png","jpg","jpeg","tif","tiff","exr","tga"]
+        # Prefer explicit "..._..._diffuse" allowing tokens between base and diffuse (e.g., u0_v0, 1001)
+        patterns_specific = []
+        # base_*_diffuse.ext then base_diffuse.ext
+        for ext in exts:
+            patterns_specific.append(f"{base}_*_diffuse.{ext}")
+        for ext in exts:
+            patterns_specific.append(f"{base}_diffuse.{ext}")
+        cand = _glob_one(patterns_specific, directory)
+        if cand:
+            return cand
+        # As a last resort, allow any image beginning with base (no map filter)
+        patterns_loose = [f"{base}.{ext}" for ext in exts] + [f"{base}_*.{ext}" for ext in exts]
+        return _glob_one(patterns_loose, directory)
+    except Exception:
+        return None
+
 def _find_inputs(bake_mesh_dir):
     low  = _glob_one(["*_Optimized.fbx", "*_optimized.fbx"], bake_mesh_dir)
     high = _glob_one(["*_HighPoly.fbx", "*_highpoly.fbx", "*_HP.fbx"], bake_mesh_dir)
     cage = _glob_one(["*_Cage.fbx", "*_cage.fbx"], bake_mesh_dir)
-    # TextureTransfer source texture: prefer common naming; include HighPoly.* as a robust fallback
+    # TextureTransfer source texture (diffuse/albedo). Prefer textures that start with the HighPoly base name
+    # and allow extra tokens like UDIM (1001) or u0_v0 before the map name.
     # Only consider image files for the TextureTransfer source (avoid matching FBX)
-    diff = _glob_one([
-        "*_u0_v0_diffuse.png", "*_u0_v0_diffuse.jpg", "*_u0_v0_diffuse.jpeg", "*_u0_v0_diffuse.tif", "*_u0_v0_diffuse.tiff", "*_u0_v0_diffuse.exr", "*_u0_v0_diffuse.tga",
-        "*diffuse.png", "*diffuse.jpg", "*diffuse.jpeg", "*diffuse.tif", "*diffuse.tiff", "*diffuse.exr", "*diffuse.tga",
-        "*_HighPoly.png", "*_HighPoly.jpg", "*_HighPoly.jpeg", "*_HighPoly.tif", "*_HighPoly.tiff", "*_HighPoly.exr", "*_HighPoly.tga",
-        "*_highpoly.png", "*_highpoly.jpg", "*_highpoly.jpeg", "*_highpoly.tif", "*_highpoly.tiff", "*_highpoly.exr", "*_highpoly.tga",
-    ], bake_mesh_dir)
+    diff = _diffuse_for_high(high, bake_mesh_dir)
+    if not diff:
+        diff = _glob_one([
+            "*_u0_v0_diffuse.png", "*_u0_v0_diffuse.jpg", "*_u0_v0_diffuse.jpeg", "*_u0_v0_diffuse.tif", "*_u0_v0_diffuse.tiff", "*_u0_v0_diffuse.exr", "*_u0_v0_diffuse.tga",
+            "*diffuse.png", "*diffuse.jpg", "*diffuse.jpeg", "*diffuse.tif", "*diffuse.tiff", "*diffuse.exr", "*diffuse.tga",
+            # Broad fallbacks (kept for legacy cases)
+            "*_HighPoly.png", "*_HighPoly.jpg", "*_HighPoly.jpeg", "*_HighPoly.tif", "*_HighPoly.tiff", "*_HighPoly.exr", "*_HighPoly.tga",
+            "*_highpoly.png", "*_highpoly.jpg", "*_highpoly.jpeg", "*_highpoly.tif", "*_highpoly.tiff", "*_highpoly.exr", "*_highpoly.tga",
+        ], bake_mesh_dir)
     # Gather additional _Part#_HighPoly FBXs
     high_parts = []
     try:
@@ -771,7 +800,8 @@ class VIVID_OT_bake_designer(Operator):
         if not files.get('cage') or not os.path.isfile(files.get('cage', '')):
             files['cage'] = _glob_one(["*_Cage.fbx", "*_cage.fbx"], bake_mesh)
         if not files.get('diffuse') or not os.path.isfile(files.get('diffuse', '')):
-            files['diffuse'] = _glob_one([
+            # Try again using the discovered HighPoly base for specificity
+            files['diffuse'] = _diffuse_for_high(files.get('high', ''), bake_mesh) or _glob_one([
                 "*_u0_v0_diffuse.png", "*_u0_v0_diffuse.jpg", "*_u0_v0_diffuse.jpeg", "*_u0_v0_diffuse.tif", "*_u0_v0_diffuse.tiff", "*_u0_v0_diffuse.exr", "*_u0_v0_diffuse.tga",
                 "*diffuse.png", "*diffuse.jpg", "*diffuse.jpeg", "*diffuse.tif", "*diffuse.tiff", "*diffuse.exr", "*diffuse.tga",
                 "*_HighPoly.png", "*_HighPoly.jpg", "*_HighPoly.jpeg", "*_HighPoly.tif", "*_HighPoly.tiff", "*_HighPoly.exr", "*_HighPoly.tga",
@@ -900,7 +930,7 @@ class VIVID_OT_bake_designer(Operator):
                                         # Set render pass if supported (usually affects Rendered / Material preview overlays)
                                         if hasattr(shading, 'render_pass'):
                                             try:
-                                                shading.render_pass = 'DIFFUSE_COLOR'
+                                                shading.render_pass = 'EMISSION'
                                             except Exception:
                                                 pass
                             # We only need to modify the first VIEW_3D we encounter per window
