@@ -427,6 +427,39 @@ def _run_baker(exe_path, json_path, log_path, cwd, use_cpu=False):
         log.write("\nReturn code: {}\n".format(p.returncode))
         return p.returncode
 
+def _warn_if_tiff_loader_error(log_path: str, operator=None):
+    """Scan a Substance baker log for common TIFF loader failures and print a helpful hint.
+    Triggers on messages like:
+      - Freeimage Error>> Error while opening TIFF: data is invalid. (format: TIFF)
+      - Failed to load image from path: <...>.tif(f)
+    """
+    try:
+        if not log_path or not os.path.isfile(log_path):
+            return
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            txt = f.read()
+        if not txt:
+            return
+        # Look for explicit TIFF loader errors or failed path ending in .tif/.tiff
+        pat = re.compile(r"Error while opening TIFF|Failed to load image from path\s*:\s*.*\.(?:tif|tiff)\b", re.IGNORECASE)
+        if pat.search(txt):
+            msg = (
+                "Designer/FreeImage had trouble loading a TIFF. Re-export as 24-bit RGB/BGR TIFF (no alpha), "
+                "use LZW or None compression, avoid BigTIFF/pyramids. PNG 8-bit sRGB can also work (but max 32k)."
+            )
+            # Print to Blender console and surface as operator warning when available
+            try:
+                print("[VIVID] WARNING:", msg)
+            except Exception:
+                pass
+            try:
+                if operator is not None and hasattr(operator, 'report'):
+                    operator.report({'WARNING'}, msg)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
 # ------------------------------------------------------------
 # Export scope (only bake exports)
 # ------------------------------------------------------------
@@ -865,6 +898,8 @@ class VIVID_OT_bake_designer(Operator):
                 except Exception:
                     pass
                 rc = _run_baker(exe_path, gen_json, log_path, cwd=bake_mesh, use_cpu=use_cpu)
+                # Surface helpful TIFF warning if Substance/FreeImage rejects the source
+                _warn_if_tiff_loader_error(log_path, operator=self)
                 rc_total = rc_total or rc
                 _rename_bake_outputs_with_part(out_dir, part_token)
         else:
@@ -885,6 +920,8 @@ class VIVID_OT_bake_designer(Operator):
             except Exception:
                 pass
             rc_total = _run_baker(exe_path, gen_main, log_path, cwd=bake_mesh, use_cpu=use_cpu)
+            # Surface helpful TIFF warning if Substance/FreeImage rejects the source
+            _warn_if_tiff_loader_error(log_path, operator=self)
             # Normalize filenames to (object)_(Part1)_(udim)_(baker)
             _rename_bake_outputs_with_part(part_dir, "Part1")
 
