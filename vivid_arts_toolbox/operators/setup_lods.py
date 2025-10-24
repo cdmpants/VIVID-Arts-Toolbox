@@ -5,6 +5,7 @@ import os
 import re
 from .. import utils
 from .. import preferences
+import math
 
 
 # === VIVID: ShadowProxy naming helper ===
@@ -58,6 +59,97 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
             return {'CANCELLED'}
 
         def _proc_one(src: bpy.types.Object):
+            # Helper: assign faces by UDIM using only existing materials on the mesh
+            def _assign_faces_by_udim_existing_mats(obj: bpy.types.Object):
+                me = obj.data
+                if not getattr(me, 'uv_layers', None) or len(me.uv_layers) == 0:
+                    return
+                # Build UDIM->slot mapping from the object's current materials
+                import re as _re
+                udim_to_slot = {}
+                for i, m in enumerate(me.materials):
+                    if not m or not isinstance(m.name, str):
+                        continue
+                    m4 = _re.search(r"(\d{4})$", m.name)
+                    if not m4:
+                        continue
+                    try:
+                        val = int(m4.group(1))
+                    except Exception:
+                        continue
+                    if val >= 1001:
+                        udim_to_slot[val] = i
+                # Helper to compute UDIM from a polygon
+                def _uv_tile_index(x: float) -> int:
+                    EPS = 1e-6
+                    n = math.floor(x)
+                    if x >= 0.0 and n >= 1 and (x - n) >= 0.0 and (x - n) < EPS:
+                        x = x - EPS
+                    return int(math.floor(x))
+                def _poly_udim(_obj, poly_index) -> int:
+                    _me = _obj.data
+                    uv_layer = _me.uv_layers.active or (_me.uv_layers[0] if _me.uv_layers else None)
+                    if not uv_layer:
+                        return 1001
+                    poly = _me.polygons[poly_index]
+                    loop_index = poly.loop_start
+                    luv = uv_layer.data[loop_index].uv
+                    u = _uv_tile_index(float(luv.x))
+                    v = _uv_tile_index(float(luv.y))
+                    return 1001 + u + v * 10
+                # Assign per polygon only to slots that exist
+                for poly in me.polygons:
+                    udim = _poly_udim(obj, poly.index)
+                    slot = udim_to_slot.get(udim)
+                    if slot is not None:
+                        poly.material_index = slot
+
+            # Helper: prune any materials that no polygon uses
+            def _prune_unused_materials(obj: bpy.types.Object):
+                me = obj.data
+                if not me.materials:
+                    return
+                used = set()
+                for p in me.polygons:
+                    used.add(p.material_index)
+                # Remove unused slots from end to start to keep indices stable
+                for idx in range(len(me.materials) - 1, -1, -1):
+                    if idx not in used:
+                        try:
+                            me.materials.pop(index=idx)
+                        except Exception:
+                            # Fallback if pop with index not available in this Blender version
+                            try:
+                                mat = me.materials[idx]
+                                me.materials.clear()
+                                # Rebuild without the removed index
+                            except Exception:
+                                pass
+
+            # Helper: remove existing LOD objects so the operator is idempotent
+            def _remove_existing_lod_targets(collection: bpy.types.Collection, base_label: str):
+                to_delete = []
+                patterns = [
+                    rf"^{re.escape(base_label)}_LOD[0-3]$",
+                    rf"^{re.escape(base_label)}_MeshCollider$",
+                    rf"^{re.escape(base_label)}_ShadowProxy(_LOD[0-3])?$",
+                ]
+                for o in list(collection.objects):
+                    for pat in patterns:
+                        if re.match(pat, o.name):
+                            to_delete.append(o)
+                            break
+                # Unlink from all collections and delete
+                for o in to_delete:
+                    try:
+                        for col in list(o.users_collection):
+                            col.objects.unlink(o)
+                    except Exception:
+                        pass
+                    try:
+                        bpy.data.objects.remove(o, do_unlink=True)
+                    except Exception:
+                        pass
             # Parse base label and variant index
             m = re.match(r'(.+)_Cinema(?:_Var(\d+))?$', src.name)
             base = None; var_idx = None
@@ -77,6 +169,9 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
             if not lod_coll:
                 lod_coll = bpy.data.collections.new(lod_coll_name)
                 context.scene.collection.children.link(lod_coll)
+            else:
+                # Make the operator idempotent per base_label in this collection
+                _remove_existing_lod_targets(lod_coll, base_label)
             # Prepare paths
             blend_filepath = bpy.data.filepath
             if not blend_filepath:
@@ -178,14 +273,9 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 lod.data.materials.clear()
                 for m in original_mats:
                     lod.data.materials.append(m)
-                # Assign UDIM materials to faces on the LOD mesh as well
-                try:
-                    bpy.ops.object.select_all(action='DESELECT')
-                    lod.select_set(True)
-                    context.view_layer.objects.active = lod
-                    bpy.ops.vivid.udim_material_assignment()
-                except Exception:
-                    pass
+                # Assign faces by UDIM using the existing Cinema materials only, then prune extras
+                _assign_faces_by_udim_existing_mats(lod)
+                _prune_unused_materials(lod)
                 lod_names.append(lod.name)
 
             # Data Transfer (normals from Cinema source) — apply to all imported LODs
