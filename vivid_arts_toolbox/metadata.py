@@ -302,6 +302,35 @@ class VIVID_OT_open_release_folder(Operator):
             return {'CANCELLED'}
 
 
+class VIVID_OT_open_production_folder(Operator):
+    bl_idname = "vivid.open_production_folder"
+    bl_label = "Open Production Folder"
+    bl_description = "Open this asset's Production folder (current .blend directory)"
+
+    def execute(self, context):
+        try:
+            path = _blend_dir()
+            os.makedirs(path, exist_ok=True)
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to resolve Production folder: {e}")
+            return {'CANCELLED'}
+        try:
+            bpy.ops.wm.path_open(filepath=path)
+            return {'FINISHED'}
+        except Exception:
+            pass
+        try:
+            if os.name == 'nt':
+                os.startfile(path)  # type: ignore[attr-defined]
+            else:
+                import subprocess
+                subprocess.Popen(['xdg-open', path])
+            return {'FINISHED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to open: {e}")
+            return {'CANCELLED'}
+
+
 class VIVID_OT_reload_local_json(Operator):
     bl_idname = "vivid.reload_local_json"
     bl_label = "Reload Local JSONs"
@@ -472,6 +501,7 @@ CLASSES = (
     VIVID_OT_label_add,
     VIVID_OT_label_remove,
     VIVID_OT_export_metadata_json,
+    VIVID_OT_open_production_folder,
     VIVID_OT_open_release_folder,
     VIVID_OT_reload_local_json,
     VIVID_OT_load_reference_json,

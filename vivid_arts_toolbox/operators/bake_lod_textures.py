@@ -208,9 +208,14 @@ class VIVID_OT_bake_lod_textures(Operator):
             return mapping, single
 
         total_rc = 0
+        # Ensure logs go under BakeMesh/bake_log and JSONs under BakeMesh/bake_settings
+        log_dir = os.path.join(bake_mesh, "bake_log")
+        settings_dir = os.path.join(bake_mesh, "bake_settings")
+        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(settings_dir, exist_ok=True)
         for lod_obj, lod_fbx, cage_obj, cage_fbx in lod_pairs:
-            gen_base = os.path.join(bake_mesh, f"_generated_bakeLOD_{lod_obj.name}")
-            log_base = os.path.join(bake_mesh, f"bakeLOD_{lod_obj.name}")
+            gen_base = os.path.join(settings_dir, f"_generated_bakeLOD_{lod_obj.name}")
+            log_base = os.path.join(log_dir, f"bakeLOD_{lod_obj.name}")
             files = {"low": lod_fbx, "high": cinema_fbx, "cage": cage_fbx}
             # Determine UDIM tiles on LOD and matching Cinema normals in Textures
             tiles = []

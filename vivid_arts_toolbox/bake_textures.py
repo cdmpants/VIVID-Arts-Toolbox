@@ -787,14 +787,20 @@ class VIVID_OT_bake_designer(Operator):
             base_name = None
 
         rc_total = 0
+        # Ensure a dedicated log directory under BakeMesh
+        log_dir = os.path.join(bake_mesh, "bake_log")
+        os.makedirs(log_dir, exist_ok=True)
+        # Ensure a dedicated settings directory under BakeMesh for generated JSONs
+        settings_dir = os.path.join(bake_mesh, "bake_settings")
+        os.makedirs(settings_dir, exist_ok=True)
         if parts:
             for part_token, hp in parts:
                 out_dir = os.path.join(bake_tex, part_token)
                 os.makedirs(out_dir, exist_ok=True)
                 files_local = dict(files)
                 files_local['high'] = hp
-                log_path = os.path.join(bake_mesh, f"bake_{part_token}.log")
-                gen_json = os.path.join(bake_mesh, f"_generated_bake_{part_token}.json")
+                log_path = os.path.join(log_dir, f"bake_{part_token}.log")
+                gen_json = os.path.join(settings_dir, f"_generated_bake_{part_token}.json")
                 _load_and_patch_json(main_json, files_local, out_dir, gen_json, res_px, settings=settings)
                 try:
                     udim_tiles = _udim_tiles_from_object(opt_obj) if opt_obj else []
@@ -810,8 +816,8 @@ class VIVID_OT_bake_designer(Operator):
             # Patch + run a single JSON
             part_dir = os.path.join(bake_tex, "Part1")
             os.makedirs(part_dir, exist_ok=True)
-            log_path = os.path.join(bake_mesh, "bake_designer.log")
-            gen_main = os.path.join(bake_mesh, "_generated_bake_preset.json")
+            log_path = os.path.join(log_dir, "bake_designer.log")
+            gen_main = os.path.join(settings_dir, "_generated_bake_preset.json")
             _load_and_patch_json(main_json, files, part_dir, gen_main, res_px, settings=settings)
 
             # UDIM detection from active *_Optimized object and JSON patching (uv_tiles, is_udim)

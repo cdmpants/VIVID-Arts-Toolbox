@@ -45,6 +45,9 @@ class VIVID_OT_export_lods(bpy.types.Operator):
             if o.type != 'MESH':
                 continue
             n = o.name
+            # Skip LOD Cages entirely (names like *_LOD#_Cage or in LOD_Cage collection)
+            if "_Cage" in n or any(c.name == 'LOD_Cage' for c in getattr(o, 'users_collection', []) or []):
+                continue
             if any(s in n for s in ["_LOD0", "_LOD1", "_LOD2", "_LOD3", "_ShadowProxy", "_MeshCollider", "_ConvexCollider"]):
                 lod_candidates.append(o)
 

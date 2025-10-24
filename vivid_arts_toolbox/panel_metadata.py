@@ -35,6 +35,8 @@ class VIVID_PT_metadata(Panel):
         s = getattr(context.scene, 'vivid_metadata', None)
         # Quick access: open Release folder at the very top
         row = layout.row(align=True)
+        row.operator("vivid.open_production_folder", text="Open Production Folder", icon='FILE_FOLDER')
+        row = layout.row(align=True)
         row.operator("vivid.open_release_folder", text="Open Release Folder", icon='FILE_FOLDER')
         col = layout.column(align=True)
         col.operator("vivid.export_metadata_json", text="Export JSONs", icon='EXPORT')

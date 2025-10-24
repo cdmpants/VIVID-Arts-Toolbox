@@ -20,12 +20,6 @@ def _delighter_update(self, context):
 
 class VIVID_LightRemovalSettings(PropertyGroup):
     __annotations__ = {}
-    __annotations__['bake_resolution'] = EnumProperty(
-        name="Bake Resolution",
-        description="Resolution for Delit bake",
-        items=[(str(v), f"{v}", "") for v in (256,512,1024,2048,4096,8192)],
-        default="4096",
-    )
     __annotations__['engine'] = EnumProperty(
         name="Engine",
         description="Use CPU or GPU for Cycles",
@@ -194,7 +188,12 @@ class VIVID_OT_bake_delit(Operator):
         else:
             base_out_dir = os.path.join(root, "ProcessTextures")
         os.makedirs(base_out_dir, exist_ok=True)
-        res = int(s.bake_resolution)
+        # Use Designer bake resolution for texture processing to keep settings unified
+        try:
+            ds = getattr(context.scene, 'vivid_designer_bake', None)
+            res = int(ds.bake_resolution) if ds and getattr(ds, 'bake_resolution', None) else 4096
+        except Exception:
+            res = 4096
 
         def ensure_target_tex_node(mat):
             if not (mat and mat.use_nodes and mat.node_tree):

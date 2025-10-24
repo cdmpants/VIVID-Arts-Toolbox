@@ -175,7 +175,7 @@ class VIVID_PT_texture_processing(Panel):
         box = layout.box()
         box.label(text="Settings", icon='PREFERENCES')
         if s:
-            row = box.row(align=True); row.prop(s, "bake_resolution", text="Bake Resolution")
+            # Resolution is unified with Designer Bake settings; see Asset > Bake Textures
             row = box.row(align=True); row.prop(s, "engine",          text="Engine")
             # Show Delighter options toggle below Engine
             row = box.row(align=True); row.prop(s, "show_delighter_options", text="Show Delighter Options")
