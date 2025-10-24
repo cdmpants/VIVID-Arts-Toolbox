@@ -1,6 +1,7 @@
 # vivid_arts_toolbox/operators/udim_material_assignment.py
 import bpy
 import math
+import re
 from bpy.types import Operator
 import os
 from .setup_materials import _append_or_get_template, _clone_material_from_template, _gather_textures_for_object, _set_images_by_baker
@@ -63,9 +64,8 @@ class VIVID_OT_udim_material_assignment(Operator):
             self.report({'INFO'}, "No UDIM tiles detected; nothing to assign")
             return {'FINISHED'}
 
-        # Ensure materials exist for all present UDIMs
-        name_prefix = obj.name + "_"
-        # Try to gather textures best-effort (use BakeTextures Part1 if present, else root) for the object's base name without LOD suffix
+        # Ensure materials exist for all present UDIMs; for LODs reuse Cinema materials
+        # Determine material base name (strip LOD/Collider/ShadowProxy suffixes)
         try:
             base_for_textures = obj.name
             for suf in ("_LOD0","_LOD1","_LOD2","_LOD3","_MeshCollider","_ShadowProxy"):
@@ -81,24 +81,46 @@ class VIVID_OT_udim_material_assignment(Operator):
                 tex_map = _gather_textures_for_object(bake_tex, base_for_textures)
         except Exception:
             tex_map = {}
+        mat_base = base_for_textures
+        root_prefix = mat_base + "_"
 
         # Prepare template for creating missing materials
         template = _append_or_get_template("Delighter")
 
-        # Build current map and create missing
+        # Build current map from existing materials. Accept any material whose name
+        # starts with the object root (e.g., Base_ or Base_Optimized_) and ends with
+        # a 4-digit UDIM. This allows LODs to reuse Cinema materials like
+        # Base_Optimized_1001 without creating duplicate Base_1001 materials.
         udim_to_slot = {}
+        existing_prefix_for_creation = None
         for i, m in enumerate(me.materials):
-            if not m or not m.name.startswith(name_prefix):
+            if not m or not isinstance(m.name, str):
                 continue
-            tail = m.name[len(name_prefix):]
-            if tail.isdigit():
-                udim_to_slot[int(tail)] = i
+            name = m.name
+            if not name.startswith(root_prefix):
+                continue
+            m4 = re.search(r"(\d{4})$", name)
+            if not m4:
+                continue
+            try:
+                udim_val = int(m4.group(1))
+            except Exception:
+                continue
+            if udim_val < 1001:
+                continue
+            udim_to_slot[udim_val] = i
+            if existing_prefix_for_creation is None:
+                # Prefix up to the UDIM digits (keeps any extra tokens like _Optimized_)
+                existing_prefix_for_creation = name[: -4]
 
         # Create any missing UDIM materials and wire textures for them; refresh textures for existing ones
         for udim in sorted(present_udims):
             if udim not in udim_to_slot:
                 # Create new material
-                mat_name = f"{obj.name}_{udim}"
+                if existing_prefix_for_creation:
+                    mat_name = f"{existing_prefix_for_creation}{udim}"
+                else:
+                    mat_name = f"{mat_base}_{udim}"
                 if template:
                     mat = _clone_material_from_template(mat_name, template)
                 else:

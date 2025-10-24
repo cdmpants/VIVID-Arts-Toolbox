@@ -85,7 +85,7 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
             lods_dir = os.path.join(blend_dir, "LODs")
             os.makedirs(lods_dir, exist_ok=True)
 
-            # Save original materials from src and prepare temporary color grid material for export
+            # Capture original materials from source (Cinema) — do not modify src slots
             original_mats = list(src.data.materials)
             self.report({'INFO'}, "Preparing temporary Color Grid for export...")
             temp_img = bpy.data.images.new(
@@ -106,37 +106,31 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
             tex = nodes.new("ShaderNodeTexImage"); tex.location = (-300, 0); tex.image = temp_img
             links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
             links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
-            # Assign temporary export mat
-            src.data.materials.clear(); src.data.materials.append(temp_mat)
+            # Duplicate the source object with a single-user mesh and assign the temp material for export only
+            dup = src.copy()
+            dup.data = src.data.copy()
+            try:
+                context.scene.collection.objects.link(dup)
+            except Exception:
+                pass
+            dup.matrix_world = src.matrix_world.copy()
+            dup.data.materials.clear(); dup.data.materials.append(temp_mat)
 
-            # Export Cinema (as base) to DAE for external pipeline
+            # Export the duplicate to DAE for external pipeline
             dae_path = os.path.join(lods_dir, f"{base_label}_Cinema.dae")
-            prev_vis = getattr(src, 'hide_viewport', False)
-            prev_sel = src.select_get()
-            try:
-                src.hide_set(False)
-            except Exception:
-                try:
-                    src.hide_viewport = False
-                except Exception:
-                    pass
             bpy.ops.object.select_all(action='DESELECT')
-            src.select_set(True)
-            context.view_layer.objects.active = src
+            dup.select_set(True)
+            context.view_layer.objects.active = dup
             bpy.ops.wm.collada_export(filepath=dae_path, selected=True, apply_modifiers=True)
+            # Remove duplicate object and its mesh
             try:
-                src.hide_set(prev_vis)
+                mesh_ref = dup.data
+                bpy.data.objects.remove(dup, do_unlink=True)
+                if mesh_ref and mesh_ref.users == 0:
+                    bpy.data.meshes.remove(mesh_ref, do_unlink=True)
             except Exception:
-                try:
-                    src.hide_viewport = prev_vis
-                except Exception:
-                    pass
-            src.select_set(prev_sel)
+                pass
             self.report({'INFO'}, f"Exported {dae_path}")
-            # Restore original materials on src
-            src.data.materials.clear()
-            for m in original_mats:
-                src.data.materials.append(m)
 
             # Generate LOD0–3 with MeshLab/PyMeshLab
             face_count = len(src.data.polygons)
@@ -156,8 +150,16 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
 
             # Import LOD0–3 into LOD collection and reapply original materials
             lod_names = []
+            # Determine filename prefix used by MeshLab outputs
+            # For variants, outputs include "_Cinema_Var#"; for base, they strip "_Cinema"
+            if '_Cinema_Var' in src.name:
+                output_prefix = src.name
+            elif src.name.endswith('_Cinema'):
+                output_prefix = src.name[:-7]
+            else:
+                output_prefix = base_label
             for i in range(0, 4):
-                lod_path = os.path.join(lods_dir, f"{base_label}_LOD{i}.dae")
+                lod_path = os.path.join(lods_dir, f"{output_prefix}_LOD{i}.dae")
                 if not os.path.exists(lod_path):
                     raise RuntimeError(f"Missing {lod_path}")
                 bpy.ops.wm.collada_import(filepath=lod_path, import_units=True, find_chains=True)
@@ -226,6 +228,11 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                     uvs = collider.data.uv_layers
                     while uvs and len(uvs) > 0:
                         uvs.remove(uvs[0])
+                except Exception:
+                    pass
+                # Viewport wireframe for mesh collider
+                try:
+                    collider.display_type = 'WIRE'
                 except Exception:
                     pass
 
