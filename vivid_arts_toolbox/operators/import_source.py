@@ -1,6 +1,7 @@
 import bpy
 import os
 from bpy.types import Operator
+import re
 
 
 def _blend_dir():
@@ -69,6 +70,15 @@ class VIVID_OT_import_simplified(Operator):
             return {'FINISHED'}
 
         target_name = "Optimized" if as_optimized else "Simplified"
+        # Desired base object name derived from FBX filename (without extension)
+        fbx_base = os.path.splitext(os.path.basename(fbx_path))[0]  # e.g., Base_Simplified
+        desired_base = fbx_base
+        if as_optimized:
+            # Replace trailing _Simplified (case-insensitive) with _Optimized; fallback to append
+            if re.search(r"_Simplified$", desired_base, flags=re.IGNORECASE):
+                desired_base = re.sub(r"_Simplified$", "_Optimized", desired_base, flags=re.IGNORECASE)
+            elif not desired_base.endswith("_Optimized"):
+                desired_base = f"{desired_base}_Optimized"
         target_col = _ensure_collection(target_name)
 
         for obj in new_objs:
@@ -94,19 +104,54 @@ class VIVID_OT_import_simplified(Operator):
                             pass
             except Exception:
                 pass
-            # Rename suffix
-            if as_optimized:
-                new_name = obj.name
-                if new_name.endswith('_Simplified'):
-                    new_name = new_name[:-11] + '_Optimized'
-                elif not new_name.endswith('_Optimized'):
-                    new_name = f"{new_name}_Optimized"
-                try:
-                    obj.name = new_name
-                except Exception:
-                    pass
+            # Enforce imported object name based on FBX filename (primary for meshes)
+            try:
+                if obj.type == 'MESH':
+                    obj.name = desired_base
+            except Exception:
+                pass
 
         _delete_default_collection_if_empty()
+
+        # Create a data-linked Cage duplicate for the Optimized mesh (hidden, with Displace modifier)
+        if as_optimized:
+            try:
+                opt_obj = bpy.data.objects.get(desired_base)
+                if opt_obj and opt_obj.type == 'MESH':
+                    cage_name = desired_base[:-10] + '_Cage' if desired_base.endswith('_Optimized') else desired_base + '_Cage'
+                    if not bpy.data.objects.get(cage_name):
+                        cage_obj = opt_obj.copy()
+                        cage_obj.data = opt_obj.data  # share mesh data (data-linked)
+                        cage_obj.name = cage_name
+                        # Link to the same collection as the optimized object when possible
+                        linked = False
+                        try:
+                            for coll in getattr(opt_obj, 'users_collection', []) or []:
+                                coll.objects.link(cage_obj)
+                                linked = True
+                                break
+                        except Exception:
+                            linked = False
+                        if not linked:
+                            try:
+                                bpy.context.scene.collection.objects.link(cage_obj)
+                            except Exception:
+                                pass
+                        # Hide in viewport
+                        try:
+                            if hasattr(cage_obj, 'hide_set'):
+                                cage_obj.hide_set(True)
+                            else:
+                                cage_obj.hide_viewport = True
+                        except Exception:
+                            pass
+                        # Add a Displace modifier with default settings
+                        try:
+                            cage_obj.modifiers.new(name='Displace', type='DISPLACE')
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
         self.report({'INFO'}, f"Imported {len(new_objs)} object(s) to '{target_name}' collection")
         return {'FINISHED'}

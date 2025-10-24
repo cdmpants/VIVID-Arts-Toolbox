@@ -10,6 +10,7 @@ from ..bake_textures import (
     _apply_udim_to_json,
     _run_baker,
 )
+from ..bake_textures import _clean_dir
 from ..utils import resource_or_legacy
 
 class VIVID_OT_bake_lod_textures(Operator):
@@ -33,6 +34,11 @@ class VIVID_OT_bake_lod_textures(Operator):
         textures_dir = os.path.join(release_dir, 'Textures')
         mesh_dir = os.path.join(release_dir, 'Mesh')
         os.makedirs(textures_dir, exist_ok=True)
+        # Start with a clean Release/Textures folder for fresh LOD outputs
+        try:
+            _clean_dir(textures_dir)
+        except Exception:
+            pass
         os.makedirs(mesh_dir, exist_ok=True)
 
         # Locate Cinema FBX in Release/Mesh (fallback to Release root for backward compatibility)

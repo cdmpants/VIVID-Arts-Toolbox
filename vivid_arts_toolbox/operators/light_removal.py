@@ -4,6 +4,7 @@ from bpy.types import Operator, PropertyGroup, Panel
 from bpy.props import EnumProperty, PointerProperty, BoolProperty, FloatProperty
 
 from ..bake_textures import _folders, _find_optimized_object
+from ..bake_textures import _clean_dir
 from ..bake_textures import _udim_tiles_from_object
 from ..metadata import _release_mirror_dir
 
@@ -87,6 +88,16 @@ class VIVID_OT_bake_delit(Operator):
         if not s:
             self.report({'ERROR'}, "Light Removal settings not found on scene.")
             return {'CANCELLED'}
+
+        # Clean ProcessTextures and local bake logs/settings before processing
+        try:
+            root, bake_mesh, _ = _folders()
+            process_dir = os.path.join(root, "ProcessTextures")
+            _clean_dir(process_dir)
+            _clean_dir(os.path.join(bake_mesh, "bake_log"))
+            _clean_dir(os.path.join(bake_mesh, "bake_settings"))
+        except Exception:
+            pass
 
         # Apply Delighter sliders to materials on Optimized object (Part1 only)
         try:

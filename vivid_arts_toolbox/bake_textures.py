@@ -5,6 +5,7 @@ import json
 import math
 import time
 import subprocess
+import shutil
 from pathlib import Path
 from bpy.types import Operator, PropertyGroup
 from bpy.props import BoolProperty, PointerProperty, EnumProperty, StringProperty, FloatProperty
@@ -37,6 +38,24 @@ def _ensure_outdir():
     root, bake_mesh, bake_tex = _folders()
     os.makedirs(bake_tex, exist_ok=True)
     return root, bake_mesh, bake_tex
+
+def _clean_dir(path: str):
+    """Delete all contents of the given directory, preserving the directory itself."""
+    try:
+        if not path:
+            return
+        os.makedirs(path, exist_ok=True)
+        for name in os.listdir(path):
+            p = os.path.join(path, name)
+            try:
+                if os.path.isfile(p) or os.path.islink(p):
+                    os.remove(p)
+                elif os.path.isdir(p):
+                    shutil.rmtree(p)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 # ------------------------------------------------------------
 # File discovery
@@ -726,6 +745,13 @@ class VIVID_OT_bake_designer(Operator):
             _try_export_bake_meshes_only()
 
         root, bake_mesh, bake_tex = _ensure_outdir()
+        # Clean BakeTextures and local log/settings folders to start fresh
+        try:
+            _clean_dir(bake_tex)
+            _clean_dir(os.path.join(bake_mesh, "bake_log"))
+            _clean_dir(os.path.join(bake_mesh, "bake_settings"))
+        except Exception:
+            pass
         if not os.path.isdir(bake_mesh):
             self.report({'ERROR'}, f"Missing BakeMesh folder: {bake_mesh}")
             return {'CANCELLED'}
