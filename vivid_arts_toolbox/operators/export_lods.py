@@ -35,7 +35,9 @@ class VIVID_OT_export_lods(bpy.types.Operator):
         except RuntimeError as e:
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
-        os.makedirs(release_dir, exist_ok=True)
+        # Tidy structure: export meshes into Release/Mesh
+        mesh_dir = os.path.join(release_dir, "Mesh")
+        os.makedirs(mesh_dir, exist_ok=True)
 
         # Collect LOD objects: any *_LOD0..3 and *_ShadowProxy[_LOD*] and colliders
         lod_candidates = []
@@ -55,7 +57,7 @@ class VIVID_OT_export_lods(bpy.types.Operator):
             bpy.ops.object.select_all(action='DESELECT')
             obj.select_set(True)
             context.view_layer.objects.active = obj
-            out_path = os.path.join(release_dir, f"{obj.name}.fbx")
+            out_path = os.path.join(mesh_dir, f"{obj.name}.fbx")
             try:
                 bpy.ops.export_scene.fbx(
                     filepath=out_path,
@@ -74,7 +76,7 @@ class VIVID_OT_export_lods(bpy.types.Operator):
 
         if exported == 0:
             return {'CANCELLED'}
-        self.report({'INFO'}, f"Exported {exported} LOD FBXs to: {release_dir}")
+        self.report({'INFO'}, f"Exported {exported} LOD FBXs to: {mesh_dir}")
         return {'FINISHED'}
 
 

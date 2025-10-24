@@ -54,6 +54,11 @@ class VIVID_OT_generate_lod_cages(bpy.types.Operator):
             dup = context.active_object
             dup.name = cage_name
             dup.data.name = cage_name
+            # Add a Displace modifier with default settings
+            try:
+                dup.modifiers.new("Displace", 'DISPLACE')
+            except Exception:
+                pass
             # Unlink from all current collections, link only to cage_coll
             for c in list(dup.users_collection):
                 c.objects.unlink(dup)

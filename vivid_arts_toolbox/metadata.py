@@ -170,6 +170,33 @@ class VIVID_OT_export_metadata_json(Operator):
         except Exception:
             pass
 
+        # Compute polycounts live from current scene (preview fields are not authoritative)
+        pc = {"Cinema": None, "LOD0": None, "LOD1": None, "LOD2": None, "LOD3": None}
+        try:
+            # Cinema polycount from 'Cinema' collection (base only)
+            cin_coll = bpy.data.collections.get('Cinema')
+            if cin_coll:
+                for o in cin_coll.objects:
+                    if o.type == 'MESH' and o.name.endswith('_Cinema'):
+                        pc["Cinema"] = int(len(o.data.polygons))
+                        break
+            # Base LODs from 'LOD' collection only (ignore variants)
+            lod_coll = bpy.data.collections.get('LOD')
+            if lod_coll:
+                import re as _re
+                for o in lod_coll.objects:
+                    if o.type != 'MESH':
+                        continue
+                    m = _re.search(r"_LOD([0-3])$", o.name)
+                    if m:
+                        key = f"LOD{m.group(1)}"
+                        try:
+                            pc[key] = int(len(o.data.polygons))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
         data = {
             "Main": {
                 # Authoritative AssetID comes from the .blend filename
@@ -194,13 +221,8 @@ class VIVID_OT_export_metadata_json(Operator):
                 "Tile Y": tile_y_flag,
                 "CustomLODs": custom_lods,
             },
-            "Polycounts": {
-                "Cinema": s.poly_cinema or None,
-                "LOD0": s.poly_lod0 or None,
-                "LOD1": s.poly_lod1 or None,
-                "LOD2": s.poly_lod2 or None,
-                "LOD3": s.poly_lod3 or None,
-            },
+            # Authoritative polycounts gathered from scene; UI fields remain preview-only
+            "Polycounts": pc,
             "Source": {
                 "Capture Device": s.capture_device,
                 "Source Name": s.source_name or "",
@@ -247,6 +269,37 @@ class VIVID_OT_export_metadata_json(Operator):
             return {'CANCELLED'}
         self.report({'INFO'}, f'Exported: {out_path} and {init_out_path}')
         return {'FINISHED'}
+
+
+class VIVID_OT_open_release_folder(Operator):
+    bl_idname = "vivid.open_release_folder"
+    bl_label = "Open Release Folder"
+    bl_description = "Open this asset's mirrored Release folder in the file browser"
+
+    def execute(self, context):
+        try:
+            path = _release_mirror_dir(context)
+            os.makedirs(path, exist_ok=True)
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to resolve Release folder: {e}")
+            return {'CANCELLED'}
+        # Try Blender's path_open first
+        try:
+            bpy.ops.wm.path_open(filepath=path)
+            return {'FINISHED'}
+        except Exception:
+            pass
+        # Fallback per-OS
+        try:
+            if os.name == 'nt':
+                os.startfile(path)  # type: ignore[attr-defined]
+            else:
+                import subprocess
+                subprocess.Popen(['xdg-open', path])
+            return {'FINISHED'}
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to open: {e}")
+            return {'CANCELLED'}
 
 
 class VIVID_OT_reload_local_json(Operator):
@@ -419,6 +472,7 @@ CLASSES = (
     VIVID_OT_label_add,
     VIVID_OT_label_remove,
     VIVID_OT_export_metadata_json,
+    VIVID_OT_open_release_folder,
     VIVID_OT_reload_local_json,
     VIVID_OT_load_reference_json,
 )

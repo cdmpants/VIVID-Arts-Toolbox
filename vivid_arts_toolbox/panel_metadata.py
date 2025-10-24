@@ -33,6 +33,9 @@ class VIVID_PT_metadata(Panel):
     def draw(self, context):
         layout = self.layout
         s = getattr(context.scene, 'vivid_metadata', None)
+        # Quick access: open Release folder at the very top
+        row = layout.row(align=True)
+        row.operator("vivid.open_release_folder", text="Open Release Folder", icon='FILE_FOLDER')
         col = layout.column(align=True)
         col.operator("vivid.export_metadata_json", text="Export JSONs", icon='EXPORT')
         row = layout.row(align=True)
