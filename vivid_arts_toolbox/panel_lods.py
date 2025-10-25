@@ -99,6 +99,13 @@ class VIVID_PT_lod_textures(Panel):
     def draw(self, context):
         layout = self.layout
         col = layout.column(align=True)
+        # Slider for Displace strength used by LOD cage generation
+        s = getattr(context.scene, 'vivid_lod_props', None)
+        if s and hasattr(s, 'displace_cage_strength'):
+            col.prop(s, 'displace_cage_strength', text='Displace Modifier Strength')
+        # LOD bake max resolution selector (controls LOD0; others derive)
+        if s and hasattr(s, 'lod_max_resolution'):
+            col.prop(s, 'lod_max_resolution', text='Max Resolution')
         # Generate LOD Cages
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "generate_lod_cages"):
             col.operator("vivid.generate_lod_cages", text="Generate LOD Cages", icon='MESH_GRID')

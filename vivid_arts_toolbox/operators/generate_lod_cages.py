@@ -7,6 +7,12 @@ class VIVID_OT_generate_lod_cages(bpy.types.Operator):
     bl_description = "Duplicate base LODs from 'LOD' into 'LOD_Cage' as *_Cage, replacing existing"
 
     def execute(self, context):
+        # Read desired Displace strength from scene properties (default 1.0)
+        try:
+            sprops = getattr(context.scene, 'vivid_lod_props', None)
+            disp_strength = float(getattr(sprops, 'displace_cage_strength', 1.0)) if sprops else 1.0
+        except Exception:
+            disp_strength = 1.0
         lod_coll = bpy.data.collections.get('LOD')
         if not lod_coll:
             self.report({'ERROR'}, "'LOD' collection not found.")
@@ -54,9 +60,13 @@ class VIVID_OT_generate_lod_cages(bpy.types.Operator):
             dup = context.active_object
             dup.name = cage_name
             dup.data.name = cage_name
-            # Add a Displace modifier with default settings
+            # Add a Displace modifier using configured strength
             try:
-                dup.modifiers.new("Displace", 'DISPLACE')
+                mod = dup.modifiers.new("Displace", 'DISPLACE')
+                try:
+                    mod.strength = disp_strength
+                except Exception:
+                    pass
             except Exception:
                 pass
             # Unlink from all current collections, link only to cage_coll

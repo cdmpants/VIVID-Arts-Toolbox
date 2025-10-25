@@ -80,3 +80,25 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
     __annotations__['sp_lod1_ratio'] = FloatProperty(name="SP LOD1 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
     __annotations__['sp_lod2_ratio'] = FloatProperty(name="SP LOD2 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
     __annotations__['sp_lod3_ratio'] = FloatProperty(name="SP LOD3 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
+
+    # LOD Cage generation settings
+    __annotations__['displace_cage_strength'] = FloatProperty(
+        name="Displace Modifier Strength",
+        description="Strength applied to Displace modifiers added to generated LOD cages.",
+        default=1.0, soft_min=-10.0, soft_max=10.0, precision=3
+    )
+
+    # LOD bake max resolution (controls LOD0; LOD1/2/3 bake at 1/2, 1/4, 1/8)
+    __annotations__['lod_max_resolution'] = EnumProperty(
+        name="Max Resolution",
+        description="Maximum resolution for LOD bakes (applied to LOD0; LOD1=1/2, LOD2=1/4, LOD3=1/8)",
+        items=[
+            ("256",  "256",  "256 x 256"),
+            ("512",  "512",  "512 x 512"),
+            ("1024", "1024", "1024 x 1024"),
+            ("2048", "2048", "2048 x 2048"),
+            ("4096", "4096", "4096 x 4096"),
+            ("8192", "8192", "8192 x 8192"),
+        ],
+        default="4096",
+    )

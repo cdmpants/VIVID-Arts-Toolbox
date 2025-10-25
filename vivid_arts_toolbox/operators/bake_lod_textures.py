@@ -136,12 +136,13 @@ class VIVID_OT_bake_lod_textures(Operator):
             self.report({'ERROR'}, f"Missing bakeLOD_preset.json: {preset_path}")
             return {'CANCELLED'}
 
-        # Bake resolution and engine from Designer settings
+        # Bake resolution: prefer LOD-specific Max Resolution, fallback to Designer bake resolution
         settings = getattr(context.scene, "vivid_designer_bake", None)
+        sprops = getattr(context.scene, 'vivid_lod_props', None)
         try:
-            res_px = int(settings.bake_resolution) if settings and settings.bake_resolution else 2048
+            max_res_px = int(getattr(sprops, 'lod_max_resolution', '') or 0) or int(settings.bake_resolution) if settings and getattr(settings, 'bake_resolution', None) else 2048
         except Exception:
-            res_px = 2048
+            max_res_px = 2048
         use_cpu = (settings.engine == "CPU") if settings else False
 
         # Run bakes per LOD
@@ -226,12 +227,20 @@ class VIVID_OT_bake_lod_textures(Operator):
                 return {'CANCELLED'}
 
             # Bake per UDIM with matching source texture and single uv_tile
+            # Determine LOD index to derive per-LOD resolution
+            m = re.search(r"_LOD([0-3])$", lod_obj.name)
+            try:
+                lod_idx = int(m.group(1)) if m else 0
+            except Exception:
+                lod_idx = 0
+            lod_res_px = max(1, int(max_res_px // (2 ** lod_idx)))
+
             for ud in udim_list:
                 src_norm = normals_by_udim.get(ud)
                 src_bent = bent_by_udim.get(ud)
                 gen_json = f"{gen_base}_{ud}.json"
                 log_path = f"{log_base}_{ud}.log"
-                _load_and_patch_json(preset_path, files, textures_dir, gen_json, res_px)
+                _load_and_patch_json(preset_path, files, textures_dir, gen_json, lod_res_px)
                 # Apply single-tile UDIM for this run
                 try:
                     # Convert UDIM back to (u, v)
