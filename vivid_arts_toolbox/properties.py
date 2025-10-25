@@ -43,26 +43,32 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
         default=True,
         description="Toggle creation of collider meshes."
     )
-    # Reduction ratios
+    # LOD0 explicit target triangle count (reduced directly from Cinema)
+    __annotations__['lod0_target_tris'] = IntProperty(
+        name="LOD0 Target Tris",
+        description="Target triangle count for LOD0 reduced directly from the Cinema mesh.",
+        default=10000, min=100, soft_max=2000000
+    )
+    # Deprecated legacy ratio (kept for backward compatibility; not shown in UI)
     __annotations__['lod0_ratio'] = FloatProperty(
-        name="LOD0 Reduction",
-        description="Target face ratio for LOD0 (reduced from Cinema).",
-        default=0.025, min=0.0, max=1.0, precision=4
+        name="LOD0 Reduction (Legacy)",
+        description="Legacy: target face ratio for LOD0 (fraction of Cinema).",
+        default=0.08, min=0.0, max=1.0, precision=4
     )
     __annotations__['lod1_ratio'] = FloatProperty(
-        name="LOD1 Reduction",
-        description="Target face ratio for LOD1 (fraction of LOD0 faces).",
-        default=0.010, min=0.0, max=1.0, precision=4
+        name="LOD1 Ratio (of LOD0)",
+        description="LOD1 target is this fraction of LOD0 triangle count.",
+        default=0.40, min=0.0, max=1.0, precision=4
     )
     __annotations__['lod2_ratio'] = FloatProperty(
-        name="LOD2 Reduction",
-        description="Target face ratio for LOD2 (fraction of LOD0 faces).",
-        default=0.004, min=0.0, max=1.0, precision=4
+        name="LOD2 Ratio (of LOD0)",
+        description="LOD2 target is this fraction of LOD0 triangle count.",
+        default=0.16, min=0.0, max=1.0, precision=4
     )
     __annotations__['lod3_ratio'] = FloatProperty(
-        name="LOD3 Reduction",
-        description="Target face ratio for LOD3 (fraction of LOD0 faces).",
-        default=0.0016, min=0.0, max=1.0, precision=4
+        name="LOD3 Ratio (of LOD0)",
+        description="LOD3 target is this fraction of LOD0 triangle count.",
+        default=0.064, min=0.0, max=1.0, precision=4
     )
     __annotations__['collider_ratio'] = FloatProperty(
         name="MeshCollider Reduction",

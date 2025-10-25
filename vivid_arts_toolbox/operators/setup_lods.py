@@ -229,11 +229,22 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
 
             # Generate LOD0–3 with MeshLab/PyMeshLab
             face_count = len(src.data.polygons)
+            # Compute effective ratios relative to Cinema so utils can stay unchanged:
+            # r0 = LOD0_target / Cinema_faces; r1..3 = r0 * (ratio_of_LOD0)
+            try:
+                lod0_target = int(getattr(sprops, 'lod0_target_tris', 10000) or 10000)
+            except Exception:
+                # Fallback to legacy ratio if new prop missing
+                lod0_target = max(10, int(face_count * float(getattr(sprops, 'lod0_ratio', 0.08) or 0.08)))
+            r0 = max(10, lod0_target) / max(1, face_count)
+            r1_rel = float(getattr(sprops, 'lod1_ratio', 0.40) or 0.40)
+            r2_rel = float(getattr(sprops, 'lod2_ratio', 0.16) or 0.16)
+            r3_rel = float(getattr(sprops, 'lod3_ratio', 0.064) or 0.064)
             ratios = {
-                0: float(getattr(sprops, 'lod0_ratio', 0.08) or 0.08),
-                1: float(getattr(sprops, 'lod1_ratio', 0.40) or 0.40),
-                2: float(getattr(sprops, 'lod2_ratio', 0.16) or 0.16),
-                3: float(getattr(sprops, 'lod3_ratio', 0.064) or 0.064),
+                0: float(r0),
+                1: float(r0 * r1_rel),
+                2: float(r0 * r2_rel),
+                3: float(r0 * r3_rel),
             }
             ok = False
             if getattr(prefs, 'enable_pymeshlab_automation', False):

@@ -966,10 +966,13 @@ class VIVID_OT_bake_designer(Operator):
                                             pass
                                         # Set render pass if supported (usually affects Rendered / Material preview overlays)
                                         if hasattr(shading, 'render_pass'):
-                                            try:
-                                                shading.render_pass = 'EMISSION'
-                                            except Exception:
-                                                pass
+                                            # Prefer Diffuse Color; fall back gracefully if enum differs
+                                            for choice in ('DIFFUSE_COLOR', 'DIFFUSE', 'COLOR'):
+                                                try:
+                                                    shading.render_pass = choice
+                                                    break
+                                                except Exception:
+                                                    continue
                             # We only need to modify the first VIEW_3D we encounter per window
                             break
         except Exception:

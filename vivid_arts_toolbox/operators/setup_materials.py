@@ -282,7 +282,7 @@ class VIVID_OT_setup_materials(Operator):
             pass
 
         self.report({'INFO'}, "Materials set up/refreshed from BakeTextures")
-        # Set material preview render pass to Emission in 3D Viewports (best-effort)
+    # Set material preview render pass to Diffuse Color in 3D Viewports (best-effort)
         try:
             # Iterate all windows to robustly reach active screens
             for win in bpy.context.window_manager.windows:
@@ -298,10 +298,14 @@ class VIVID_OT_setup_materials(Operator):
                             space.shading.type = 'MATERIAL'
                         except Exception:
                             pass
-                        try:
-                            space.shading.render_pass = 'EMIT'
-                        except Exception:
-                            pass
+                        # Prefer Diffuse Color; fall back gracefully across Blender versions
+                        if hasattr(space.shading, 'render_pass'):
+                            for choice in ('DIFFUSE_COLOR', 'DIFFUSE', 'COLOR'):
+                                try:
+                                    space.shading.render_pass = choice
+                                    break
+                                except Exception:
+                                    continue
         except Exception:
             pass
         return {'FINISHED'}

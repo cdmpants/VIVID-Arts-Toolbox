@@ -34,12 +34,12 @@ class VIVID_PT_setup_lods(Panel):
             row.prop(s, "generate_collider")
             row = settings_col.row(align=True)
             row.prop(s, "collider_ratio", text="MeshCollider Ratio")
-            # LOD target ratios
+            # LOD targets: explicit LOD0 triangle count and ratios for LOD1–3 relative to LOD0
             col = settings_col.column(align=True)
-            col.prop(s, "lod0_ratio", text="LOD0 Ratio")
-            col.prop(s, "lod1_ratio", text="LOD1 Ratio")
-            col.prop(s, "lod2_ratio", text="LOD2 Ratio")
-            col.prop(s, "lod3_ratio", text="LOD3 Ratio")
+            col.prop(s, "lod0_target_tris", text="LOD0 Target Tris")
+            col.prop(s, "lod1_ratio", text="LOD1 Ratio (of LOD0)")
+            col.prop(s, "lod2_ratio", text="LOD2 Ratio (of LOD0)")
+            col.prop(s, "lod3_ratio", text="LOD3 Ratio (of LOD0)")
             # ShadowProxy toggle and per-LOD ratios (vertical)
             settings_col.prop(s, "generate_shadow_proxies")
             sp_box = settings_col.box()
