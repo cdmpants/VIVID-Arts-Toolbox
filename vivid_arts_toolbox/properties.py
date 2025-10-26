@@ -88,6 +88,28 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
         default=1.0, soft_min=-10.0, soft_max=10.0, precision=3
     )
 
+    # Per-LOD Displace strengths (override the global when set)
+    __annotations__['displace_cage_strength_lod0'] = FloatProperty(
+        name="LOD0 Displace Strength",
+        description="Displace modifier strength for LOD0 cages.",
+        default=1.0, soft_min=-10.0, soft_max=10.0, precision=3
+    )
+    __annotations__['displace_cage_strength_lod1'] = FloatProperty(
+        name="LOD1 Displace Strength",
+        description="Displace modifier strength for LOD1 cages.",
+        default=1.0, soft_min=-10.0, soft_max=10.0, precision=3
+    )
+    __annotations__['displace_cage_strength_lod2'] = FloatProperty(
+        name="LOD2 Displace Strength",
+        description="Displace modifier strength for LOD2 cages.",
+        default=1.0, soft_min=-10.0, soft_max=10.0, precision=3
+    )
+    __annotations__['displace_cage_strength_lod3'] = FloatProperty(
+        name="LOD3 Displace Strength",
+        description="Displace modifier strength for LOD3 cages.",
+        default=1.0, soft_min=-10.0, soft_max=10.0, precision=3
+    )
+
     # LOD bake max resolution (controls LOD0; LOD1/2/3 bake at 1/2, 1/4, 1/8)
     __annotations__['lod_max_resolution'] = EnumProperty(
         name="Max Resolution",

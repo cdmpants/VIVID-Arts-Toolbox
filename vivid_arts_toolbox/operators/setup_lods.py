@@ -289,12 +289,15 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 _prune_unused_materials(lod)
                 lod_names.append(lod.name)
 
-            # Data Transfer (normals from Cinema source) — apply to all imported LODs
+            # Data Transfer (normals from Cinema source) — apply to imported LODs, but skip LOD0
             src_obj = src  # use the original Cinema object as the transfer source
             if src_obj:
                 for name in lod_names:
                     lod = bpy.data.objects.get(name)
                     if not lod:
+                        continue
+                    # Skip adding Data Transfer to LOD0
+                    if name.endswith('_LOD0'):
                         continue
                     mod = lod.modifiers.new("DataTransfer", 'DATA_TRANSFER')
                     mod.object = src_obj

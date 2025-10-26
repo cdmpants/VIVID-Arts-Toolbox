@@ -10,9 +10,18 @@ class VIVID_OT_generate_lod_cages(bpy.types.Operator):
         # Read desired Displace strength from scene properties (default 1.0)
         try:
             sprops = getattr(context.scene, 'vivid_lod_props', None)
-            disp_strength = float(getattr(sprops, 'displace_cage_strength', 1.0)) if sprops else 1.0
+            global_strength = float(getattr(sprops, 'displace_cage_strength', 1.0)) if sprops else 1.0
+            # Read per-LOD overrides if present; fallback to global
+            lod_strengths = {}
+            for idx in (0, 1, 2, 3):
+                attr = f"displace_cage_strength_lod{idx}"
+                try:
+                    lod_strengths[idx] = float(getattr(sprops, attr)) if sprops and hasattr(sprops, attr) else global_strength
+                except Exception:
+                    lod_strengths[idx] = global_strength
         except Exception:
-            disp_strength = 1.0
+            global_strength = 1.0
+            lod_strengths = {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0}
         lod_coll = bpy.data.collections.get('LOD')
         if not lod_coll:
             self.report({'ERROR'}, "'LOD' collection not found.")
@@ -60,11 +69,17 @@ class VIVID_OT_generate_lod_cages(bpy.types.Operator):
             dup = context.active_object
             dup.name = cage_name
             dup.data.name = cage_name
-            # Add a Displace modifier using configured strength
+            # Add a Displace modifier using configured strength (per-LOD override)
             try:
                 mod = dup.modifiers.new("Displace", 'DISPLACE')
                 try:
-                    mod.strength = disp_strength
+                    # Determine LOD index from name suffix _LOD0.._LOD3
+                    lod_idx = None
+                    m = re.search(r"_LOD([0-3])$", src.name)
+                    if m:
+                        lod_idx = int(m.group(1))
+                    strength = lod_strengths.get(lod_idx, global_strength) if lod_idx is not None else global_strength
+                    mod.strength = strength
                 except Exception:
                     pass
             except Exception:

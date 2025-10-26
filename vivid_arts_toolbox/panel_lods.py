@@ -103,6 +103,21 @@ class VIVID_PT_lod_textures(Panel):
         s = getattr(context.scene, 'vivid_lod_props', None)
         if s and hasattr(s, 'displace_cage_strength'):
             col.prop(s, 'displace_cage_strength', text='Displace Modifier Strength')
+            # Per-LOD overrides (shown when available)
+            has_per_lod = all(hasattr(s, attr) for attr in (
+                'displace_cage_strength_lod0',
+                'displace_cage_strength_lod1',
+                'displace_cage_strength_lod2',
+                'displace_cage_strength_lod3',
+            ))
+            if has_per_lod:
+                box = col.box()
+                box.label(text="Per-LOD Displace Overrides")
+                bcol = box.column(align=True)
+                bcol.prop(s, 'displace_cage_strength_lod0', text='LOD0 Displace Strength')
+                bcol.prop(s, 'displace_cage_strength_lod1', text='LOD1 Displace Strength')
+                bcol.prop(s, 'displace_cage_strength_lod2', text='LOD2 Displace Strength')
+                bcol.prop(s, 'displace_cage_strength_lod3', text='LOD3 Displace Strength')
         # LOD bake max resolution selector (controls LOD0; others derive)
         if s and hasattr(s, 'lod_max_resolution'):
             col.prop(s, 'lod_max_resolution', text='Max Resolution')
