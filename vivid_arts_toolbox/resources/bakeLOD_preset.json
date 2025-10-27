@@ -77,7 +77,7 @@
                 "ground_offset": 0,
                 "high_scene_paths": "Value from CommonProjection/high_scene_paths",
                 "is_selected": false,
-                "normal_map_orientation": "directx",
+                "normal_map_orientation": "opengl",
                 "normal_map_path": "",
                 "normal_map_space": "tangent_space",
                 "output_format": "Value from Common/output_format",

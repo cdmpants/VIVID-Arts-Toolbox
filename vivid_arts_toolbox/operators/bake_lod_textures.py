@@ -145,9 +145,57 @@ class VIVID_OT_bake_lod_textures(Operator):
             max_res_px = 2048
         use_cpu = (settings.engine == "CPU") if settings else False
 
-        # Run bakes per LOD
-        # Helper: patch a texturetransfer baker's source texture by identifier
-        def _patch_src(json_path: str, baker_identifier: str, tex_path: str):
+    # Run bakes per LOD
+        # Helper: patch multiple TextureTransfer bakers in-place based on available sources
+        def _patch_transfer_bakers(json_path: str, udim: int, get_map_for_kind):
+            """get_map_for_kind(kind:str)->dict(udim->path). Mutates JSON to set source_texture_path and is_selected.
+            Enforces hard requirements for 'Normal' and 'BaseColor' (must exist for this UDIM), others are optional.
+            Returns (ok: bool, warnings: list[str]).
+            """
+            warnings = []
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except Exception:
+                return False, warnings
+            bakers = data.get('bakers', []) or []
+            for baker in bakers:
+                if not isinstance(baker, dict):
+                    continue
+                if str(baker.get('baker', '')).startswith('TextureTransfer'):
+                    ident = str(baker.get('identifier', '') or '')
+                    params = baker.get('parameters') or {}
+                    if not isinstance(params, dict):
+                        continue
+                    # Determine source
+                    m = get_map_for_kind(ident)
+                    src = m.get(udim) if isinstance(m, dict) else None
+                    hard = ident in ('Normal', 'BaseColor')
+                    if src:
+                        params['source_texture_path'] = src
+                        params['is_selected'] = True
+                    else:
+                        if hard:
+                            # Hard requirement missing
+                            return False, warnings
+                        # Soft requirement: disable this baker
+                        try:
+                            params['is_selected'] = False
+                        except Exception:
+                            pass
+                        if ident == 'BentNormal':
+                            warnings.append(f"Missing Cinema BentNormal texture for UDIM {udim}; continuing without it.")
+            try:
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2)
+            except Exception:
+                return False, warnings
+            return True, warnings
+
+        # Helper: ensure AO baker receives the Cinema Normal map via normal_map_path
+        def _patch_ao_normal(json_path: str, ao_normal_path: str):
+            if not ao_normal_path:
+                return
             try:
                 with open(json_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -155,14 +203,14 @@ class VIVID_OT_bake_lod_textures(Operator):
                 return
             try:
                 for baker in data.get('bakers', []) or []:
-                    if isinstance(baker, dict) and (baker.get('identifier') == baker_identifier):
+                    if isinstance(baker, dict) and baker.get('identifier') == 'AO':
                         params = baker.get('parameters') or {}
                         if isinstance(params, dict):
-                            params['source_texture_path'] = tex_path or params.get('source_texture_path', '')
+                            params['normal_map_path'] = ao_normal_path
                 with open(json_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2)
             except Exception:
-                pass
+                return
 
         # Helper: discover Cinema texture(s) in Release/Textures by UDIM for a given map kind ('Normal' or 'BentNormal')
         def _cinema_maps_by_udim(textures_root_dir: str, base_name: str, map_kind: str):
@@ -209,8 +257,9 @@ class VIVID_OT_bake_lod_textures(Operator):
             except Exception:
                 tiles = []
             base_name = lod_obj.name.split('_LOD')[0]
-            normals_by_udim = _cinema_maps_by_udim(textures_root, base_name, 'Normal')
-            bent_by_udim    = _cinema_maps_by_udim(textures_root, base_name, 'BentNormal')
+            normals_by_udim    = _cinema_maps_by_udim(textures_root, base_name, 'Normal')
+            basecolor_by_udim  = _cinema_maps_by_udim(textures_root, base_name, 'BaseColor')
+            bent_by_udim       = _cinema_maps_by_udim(textures_root, base_name, 'BentNormal')
 
             # Convert tiles to UDIM numbers
             udim_list = []
@@ -220,10 +269,14 @@ class VIVID_OT_bake_lod_textures(Operator):
             if not udim_list:
                 udim_list = [1001]
 
-            # Require a Normal map for every UDIM we intend to bake; BentNormal is optional (warn only)
+            # Require a Normal and BaseColor map for every UDIM we intend to bake; BentNormal is optional (warn only)
             missing_normals = [ud for ud in udim_list if ud not in normals_by_udim]
             if missing_normals:
                 self.report({'ERROR'}, f"Missing Cinema Normal textures for UDIMs: {missing_normals} in {textures_root}")
+                return {'CANCELLED'}
+            missing_base = [ud for ud in udim_list if ud not in basecolor_by_udim]
+            if missing_base:
+                self.report({'ERROR'}, f"Missing Cinema BaseColor textures for UDIMs: {missing_base} in {textures_root}")
                 return {'CANCELLED'}
 
             # Bake per UDIM with matching source texture and single uv_tile
@@ -236,8 +289,6 @@ class VIVID_OT_bake_lod_textures(Operator):
             lod_res_px = max(1, int(max_res_px // (2 ** lod_idx)))
 
             for ud in udim_list:
-                src_norm = normals_by_udim.get(ud)
-                src_bent = bent_by_udim.get(ud)
                 gen_json = f"{gen_base}_{ud}.json"
                 log_path = f"{log_base}_{ud}.log"
                 _load_and_patch_json(preset_path, files, textures_dir, gen_json, lod_res_px)
@@ -250,16 +301,35 @@ class VIVID_OT_bake_lod_textures(Operator):
                     _apply_udim_to_json(gen_json, [(u, v)])
                 except Exception:
                     pass
-                # Patch required/optional transfer sources
-                _patch_src(gen_json, 'Normal', src_norm)
-                if not src_norm:
-                    # This should not happen due to earlier check, but keep guard
-                    self.report({'ERROR'}, f"Missing Cinema Normal texture for UDIM {ud}")
+                # Patch TextureTransfer bakers (Normal/BaseColor hard; others soft)
+                # Build a cache for map kinds to avoid rescanning
+                cache = {
+                    'Normal': normals_by_udim,
+                    'BaseColor': basecolor_by_udim,
+                    'BentNormal': bent_by_udim,
+                }
+                def _get_map_for_kind(kind: str):
+                    if kind in cache:
+                        return cache[kind]
+                    # Lazily resolve any additional TextureTransfer identifiers
+                    cache[kind] = _cinema_maps_by_udim(textures_root, base_name, kind)
+                    return cache[kind]
+                ok, warns = _patch_transfer_bakers(gen_json, ud, _get_map_for_kind)
+                if not ok:
+                    # Determine which hard requirement is missing for better messaging
+                    msg = []
+                    if ud not in normals_by_udim:
+                        msg.append('Normal')
+                    if ud not in basecolor_by_udim:
+                        msg.append('BaseColor')
+                    if not msg:
+                        msg.append('required texture')
+                    self.report({'ERROR'}, f"Missing Cinema {' & '.join(msg)} for UDIM {ud}")
                     return {'CANCELLED'}
-                if src_bent:
-                    _patch_src(gen_json, 'BentNormal', src_bent)
-                else:
-                    self.report({'WARNING'}, f"Missing Cinema BentNormal texture for UDIM {ud}; continuing without it.")
+                for w in (warns or []):
+                    self.report({'WARNING'}, w)
+                # Ensure AO baker uses the Cinema Normal map as normal_map_path
+                _patch_ao_normal(gen_json, normals_by_udim.get(ud))
                 rc = _run_baker(exe_path, gen_json, log_path, cwd=bake_mesh, use_cpu=use_cpu)
                 total_rc += (rc or 0)
 

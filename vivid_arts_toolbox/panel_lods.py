@@ -118,14 +118,14 @@ class VIVID_PT_lod_textures(Panel):
                 bcol.prop(s, 'displace_cage_strength_lod1', text='LOD1 Displace Strength')
                 bcol.prop(s, 'displace_cage_strength_lod2', text='LOD2 Displace Strength')
                 bcol.prop(s, 'displace_cage_strength_lod3', text='LOD3 Displace Strength')
-        # LOD bake max resolution selector (controls LOD0; others derive)
-        if s and hasattr(s, 'lod_max_resolution'):
-            col.prop(s, 'lod_max_resolution', text='Max Resolution')
-        # Generate LOD Cages
+        # Generate LOD Cages (moved above Max Resolution)
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "generate_lod_cages"):
             col.operator("vivid.generate_lod_cages", text="Generate LOD Cages", icon='MESH_GRID')
         else:
             col.label(text="Operator vivid.generate_lod_cages not registered.", icon='ERROR')
+        # LOD bake max resolution selector (controls LOD0; others derive)
+        if s and hasattr(s, 'lod_max_resolution'):
+            col.prop(s, 'lod_max_resolution', text='Max Resolution')
         # Bake LOD Textures
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "bake_lod_textures"):
             col.operator("vivid.bake_lod_textures", text="Bake LOD Textures", icon='RENDER_STILL')
