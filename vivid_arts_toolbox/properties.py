@@ -124,7 +124,7 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
     __annotations__['bake_only_lod0'] = BoolProperty(
         name="Bake only LOD0",
         description="When enabled, only export and bake LOD0 (and its UDIMs/cage). Disable to bake all LODs.",
-        default=True
+        default=False
     )
 
     # LOD baking scope for textures
