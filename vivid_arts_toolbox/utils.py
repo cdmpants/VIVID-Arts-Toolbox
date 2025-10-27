@@ -3,9 +3,10 @@ import os
 import subprocess
 import tempfile
 import sys # Import sys to get the executable path of the current Blender instance
+from pathlib import Path
 
 
-def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count):
+def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count, ratios=None):
     """
     Generates LODs using meshlabserver.
     Requires MeshLab Server to be installed and path configured in preferences.
@@ -24,19 +25,25 @@ def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_
         operator.report({'ERROR'}, f"MeshLab Server not found at: {meshlab_server_path}. Please set the correct path in addon preferences.")
         return False
 
-    # Define target face counts based on initial_face_count
-    lod_targets = {
-        1: max(100, int(initial_face_count * 0.40)), # LOD1: 40% of initial, min 100 faces
-        2: max(50, int(initial_face_count * 0.16)),  # LOD2: 16% of initial, min 50 faces
-        3: max(20, int(initial_face_count * 0.064))  # LOD3: 6.4% of initial, min 20 faces
-    }
+    # Define target face counts based on initial_face_count, including optional LOD0
+    default_r = {0: 0.08, 1: 0.40, 2: 0.16, 3: 0.064}
+    r = ratios or {1: 0.40, 2: 0.16, 3: 0.064}
+    # Ensure all 0..3 keys have a value (fallback to defaults)
+    r_full = {i: float(r.get(i, default_r[i])) for i in (0, 1, 2, 3)}
+    lod_targets = {i: max(10, int(initial_face_count * r_full[i])) for i in (0, 1, 2, 3)}
 
-    base_name = lod0_obj.name.replace("_LOD0", "") # Assuming LOD0 is the naming convention
+    # Derive base name from input; if input is Cinema or variant, we will name outputs {base}_LOD{i}
+    name = lod0_obj.name
+    if name.endswith('_Cinema'):
+        base_name = name.replace('_Cinema', '')
+    else:
+        base_name = name.replace('_LOD0', '')
 
     temp_filter_file = None
     try:
-        for i in range(1, 4):
-            target_face_count = lod_targets[i]
+        # Produce LOD0..LOD3
+        for i in (0, 1, 2, 3):
+            target_face_count = lod_targets.get(i, max(10, int(initial_face_count * 0.1)))
             output_lod_name = f"{base_name}_LOD{i}.dae"
             output_filepath = os.path.join(lods_dir, output_lod_name)
 
@@ -47,6 +54,7 @@ def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_
  <filter name="Simplification: Quadric Edge Collapse Decimation (with texture)">
   <Param description="Target number of faces" value="{target_face_count}" type="RichInt" name="TargetFaceNum"/>
   <Param description="Quality threshold" value="0.5" type="RichFloat" name="QualityThr"/>
+  <Param description="Texture Weight" value="5000" type="RichFloat" isxmlparam="0" name="Extratcoordw"/>
   <Param description="Preserve Boundary of the mesh" value="true" type="RichBool" name="PreserveBoundary"/>
   <Param description="Optimal position of simplified vertices" value="true" type="RichBool" name="OptimalPlacement"/>
   <Param description="Preserve Normal" value="true" type="RichBool" name="PreserveNormal"/>
@@ -88,7 +96,81 @@ def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_
             os.remove(temp_filter_file.name)
 
 
-def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count):
+# ----------------------
+# Resource path helpers
+# ----------------------
+def resources_dir() -> Path:
+    """Return the path to the add-on's bundled resources directory.
+    We keep non-Python assets (blend/json/spp) under 'resources/'.
+    """
+    return Path(__file__).resolve().parent / "resources"
+
+
+def resource_path(name: str) -> Path:
+    """Preferred path: vivid_arts_toolbox/resources/<name>"""
+    return resources_dir() / name
+
+
+def resource_or_legacy(name: str) -> Path:
+    """Return the path to a resource under resources/ only.
+    Fallback to legacy locations has been removed to keep the add-on tidy.
+    """
+    return resource_path(name)
+
+
+# ----------------------
+# Project directory helpers
+# ----------------------
+def project_dirs() -> tuple[Path, Path, Path]:
+    """Return (root, BakeMesh, BakeTextures) based on the current .blend location.
+
+    Root is the directory containing the current .blend file. This function does not
+    create any directories; callers can create them as needed.
+
+    Raises:
+        RuntimeError: If the current .blend has not been saved yet.
+    """
+    blend_path = Path(bpy.data.filepath)
+    if not blend_path:
+        raise RuntimeError("Please save your .blend file first.")
+    root = blend_path.parent
+    return root, root / "BakeMesh", root / "BakeTextures"
+
+
+# ----------------------
+# Naming helpers (asset conventions)
+# ----------------------
+def is_optimized_name(name: str) -> bool:
+    """True if name ends with '_Optimized' (case-sensitive)."""
+    return isinstance(name, str) and name.endswith("_Optimized")
+
+
+def base_from_optimized(name: str) -> str:
+    """Strip '_Optimized' suffix if present; otherwise return name unchanged."""
+    if is_optimized_name(name):
+        return name[:-10]
+    return name
+
+
+def lod_suffix(index: int) -> str:
+    """Return LOD suffix like '_LOD0' for index 0."""
+    return f"_LOD{int(index)}"
+
+
+def lod_name(base: str, index: int) -> str:
+    """Return full LOD object name from base and index (e.g., 'Rock_LOD1')."""
+    return f"{base}{lod_suffix(index)}"
+
+
+def is_lod_name(name: str) -> bool:
+    """True if name ends with a LOD suffix like _LOD0 … _LOD9."""
+    if not isinstance(name, str):
+        return False
+    import re
+    return re.search(r"_LOD\d+$", name) is not None
+
+
+def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count, ratios=None):
     """Helper function to encapsulate PyMeshLab logic."""
     try:
         import pymeshlab as ml
@@ -108,18 +190,24 @@ def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj,
         context.report({'ERROR'}, "LOD0 has no faces. Cannot generate LODs.")
         return False
 
+    # Include LOD0; fall back to sensible defaults if not provided
     lod_target_percentages = {
-        'LOD1': 0.4,
-        'LOD2': 0.16,
-        'LOD3': 0.064
+        'LOD0': (ratios.get(0) if ratios else 0.08),
+        'LOD1': (ratios.get(1) if ratios else 0.4),
+        'LOD2': (ratios.get(2) if ratios else 0.16),
+        'LOD3': (ratios.get(3) if ratios else 0.064)
     }
 
-    original_base_name = lod0_obj.name.replace("_LOD0", "")
+    name = lod0_obj.name
+    if name.endswith('_Cinema'):
+        original_base_name = name.replace('_Cinema', '')
+    else:
+        original_base_name = name.replace('_LOD0', '')
 
     try:
         ms.set_current_mesh(0)
 
-        for i in range(1, 4):
+        for i in [0, 1, 2, 3]:
             lod_suffix = f"_LOD{i}"
             output_filename = f"{original_base_name}{lod_suffix}.dae"
             output_filepath = os.path.join(lods_dir, output_filename)
@@ -138,7 +226,8 @@ def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj,
                 planarquadric=False,
                 selected=False
             )
-            ms.save_current_current_mesh(output_filepath)
+            # Save current mesh to output
+            ms.save_current_mesh(output_filepath)
 
             context.report({'INFO'}, f"Generated {output_filename} with target faces: {target_faces}")
 

@@ -160,7 +160,8 @@ def _split_digits_at_end(text):
     return text[:i+1],text[i+1:]
 
 def find_pairs(verbose=False):
-    sc=bpy.context.scene; LOD=getattr(sc,"sp_token_lod","LOD"); PROXY=getattr(sc,"sp_token_proxy","ShadowProxy")
+    # Tokens are now hardcoded: LOD and ShadowProxy
+    LOD="LOD"; PROXY="ShadowProxy"
     lod_rx=re.compile(rf"^(.+?)_{re.escape(LOD)}(\d+)$",re.IGNORECASE)
     prox_infx=re.compile(rf"^(.+?)_{re.escape(PROXY)}_{re.escape(LOD)}(\d+)$",re.IGNORECASE)
     prox_pfx=re.compile(rf"^{re.escape(PROXY)}_(.+?)_{re.escape(LOD)}(\d+)$",re.IGNORECASE)
@@ -229,13 +230,22 @@ class OBJECT_OT_shadowproxy_fit_all_pairs(bpy.types.Operator):
     bl_label="Fit Shadow Proxies"
     bl_options={'REGISTER','UNDO'}
 
-    margin:FloatProperty(name="Inside Margin",default=0.003,min=0.0,soft_max=0.05)
-    grid:IntProperty(name="Grid Samples",default=5,min=1,max=12)
-    edge_samples:IntProperty(name="Edge Samples",default=4,min=0,max=24)
-    passes:IntProperty(name="Face Passes",default=2,min=1,max=10)
-    v_passes:IntProperty(name="Vertex Passes",default=2,min=1,max=10)
-    max_push:FloatProperty(name="Max Push",default=0.02,min=0.0,soft_max=0.1,description="Max distance (meters) any face/vertex can move per step. Set 0 to disable.")
-    only_selected:BoolProperty(name="Only Selected ShadowProxies",default=False)
+    # Define operator properties via __annotations__ to satisfy both Blender and static analyzers
+    __annotations__ = {
+        "margin": FloatProperty(name="Inside Margin", default=0.003, min=0.0, soft_max=0.05),
+        "grid": IntProperty(name="Grid Samples", default=5, min=1, max=12),
+        "edge_samples": IntProperty(name="Edge Samples", default=4, min=0, max=24),
+        "passes": IntProperty(name="Face Passes", default=2, min=1, max=10),
+        "v_passes": IntProperty(name="Vertex Passes", default=2, min=1, max=10),
+        "max_push": FloatProperty(
+            name="Max Push",
+            default=0.02,
+            min=0.0,
+            soft_max=0.1,
+            description="Max distance (meters) any face/vertex can move per step. Set 0 to disable.",
+        ),
+        "only_selected": BoolProperty(name="Only Selected ShadowProxies", default=False),
+    }
 
     def execute(self,context):
         bpy.ops.object.mode_set(mode='OBJECT',toggle=False)
@@ -256,12 +266,7 @@ class OBJECT_OT_shadowproxy_fit_all_pairs(bpy.types.Operator):
         self.report({'INFO'},f"Processed {processed} proxies; moved {total} elements.")
         return {'FINISHED'}
 
-class OBJECT_OT_shadowproxy_list_pairs(bpy.types.Operator):
-    bl_idname="object.shadowproxy_list_pairs"
-    bl_label="List Pairs"; bl_options={'INTERNAL'}
-    def execute(self,context):
-        find_pairs(verbose=True)
-        return {'FINISHED'}
+# Removed List Pairs operator per specification
 
 # =========================================================
 # Panel (now under the same tab + parent as other foldouts)
@@ -282,14 +287,12 @@ def _ensure_scene_props():
     if not hasattr(sc,"sp_v_passes"): sc.sp_v_passes=IntProperty(name="Vertex Passes",default=2,min=1,max=10)
     if not hasattr(sc,"sp_max_push"): sc.sp_max_push=FloatProperty(name="Max Push",default=0.02,min=0.0,soft_max=0.1,description="Max distance (meters) any face/vertex can move per step. Set 0 to disable.")
     if not hasattr(sc,"sp_only_selected_pairs"): sc.sp_only_selected_pairs=BoolProperty(name="Only Selected ShadowProxies",default=False)
-    if not hasattr(sc,"sp_token_lod"): sc.sp_token_lod=StringProperty(name="LOD Token",default="LOD")
-    if not hasattr(sc,"sp_token_proxy"): sc.sp_token_proxy=StringProperty(name="Proxy Token",default="ShadowProxy")
 
 # =========================================================
 # Register
 # =========================================================
 
-_classes=(OBJECT_OT_shadowproxy_fit_all_pairs,OBJECT_OT_shadowproxy_list_pairs)
+_classes=(OBJECT_OT_shadowproxy_fit_all_pairs,)
 
 def register():
     for c in _classes:

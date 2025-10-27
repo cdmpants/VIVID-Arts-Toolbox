@@ -1,35 +1,109 @@
 
 import bpy, os, re, math
 from bpy.types import Operator, PropertyGroup, Panel
-from bpy.props import EnumProperty, PointerProperty
+from bpy.props import EnumProperty, PointerProperty, BoolProperty, FloatProperty
 
-from ..bake_textures import _folders, _find_baked_textures_ex, _remove_suffix, _find_optimized_object, _find_baked_textures_by_suffix_udim
+from ..bake_textures import _folders, _find_optimized_object
+from ..bake_textures import _clean_dir
+from ..bake_textures import _udim_tiles_from_object
+from ..metadata import _release_mirror_dir
+
+def _remove_suffix(name: str, suffix: str):
+    return name[:-len(suffix)] if name.endswith(suffix) else name
+
+def _delighter_update(self, context):
+    """Property update callback: apply delighter slider values live to materials."""
+    try:
+        apply_delighter_to_materials(self)
+    except Exception:
+        pass
+
 
 class VIVID_LightRemovalSettings(PropertyGroup):
     __annotations__ = {}
-    __annotations__['bake_resolution'] = EnumProperty(
-        name="Bake Resolution",
-        description="Resolution for Delit bake",
-        items=[(str(v), f"{v}", "") for v in (256,512,1024,2048,4096,8192)],
-        default="4096",
-    )
     __annotations__['engine'] = EnumProperty(
         name="Engine",
         description="Use CPU or GPU for Cycles",
         items=[("CPU","CPU",""),("GPU","GPU","")],
         default="GPU",
     )
+    __annotations__['save_only_release'] = BoolProperty(
+        name="Save only to Release",
+        description="Only save outputs to the Release folder alongside exported FBXs and metadata",
+        default=False,
+    )
+    __annotations__['sharpen'] = BoolProperty(
+        name="Sharpen",
+        description="Apply sharpen filter to result (placeholder)",
+        default=False,
+    )
+    __annotations__['de_light_with_lightmap'] = BoolProperty(
+        name="Delight with Lightmap",
+        description="Use lightmap to assist de-lighting (placeholder)",
+        default=False,
+        update=_delighter_update,
+    )
+    # Delighter UI
+    __annotations__['show_delighter_options'] = BoolProperty(
+        name="Show Delighter Options",
+        description="Reveal the DelighterGroup sliders",
+        default=True,
+    )
+    __annotations__['divide_ao'] = FloatProperty(name="Divide AO", default=0.3, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['divide_r'] = FloatProperty(name="Divide R", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['divide_g'] = FloatProperty(name="Divide G", default=1.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['divide_b'] = FloatProperty(name="Divide B", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['invert_r'] = FloatProperty(name="Invert R", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['invert_g'] = FloatProperty(name="Invert G", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['invert_b'] = FloatProperty(name="Invert B", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    # Lightmap-specific sliders
+    __annotations__['divide_lightmap'] = FloatProperty(name="Divide Lightmap", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['lightmap_brightness'] = FloatProperty(name="Lightmap Brightness", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    __annotations__['lightmap_contrast'] = FloatProperty(name="Lightmap Contrast", default=0.0, min=0.0, max=1.0, update=_delighter_update)
+    # Tiling controls
+    __annotations__['tile_x'] = BoolProperty(
+        name="Tile X",
+        description="Enable seamless tiling in X (exposes sliders)",
+        default=False,
+    )
+    __annotations__['tile_x_threshold'] = FloatProperty(name="Threshold", default=0.5, min=0.0, max=1.0)
+    __annotations__['tile_x_smoothness'] = FloatProperty(name="Smoothness", default=0.5, min=0.0, max=1.0)
+    __annotations__['tile_x_contrast'] = FloatProperty(name="Contrast", default=0.5, min=0.0, max=1.0)
+    __annotations__['tile_y'] = BoolProperty(
+        name="Tile Y",
+        description="Enable seamless tiling in Y (exposes sliders)",
+        default=False,
+    )
+    __annotations__['tile_y_threshold'] = FloatProperty(name="Threshold", default=0.5, min=0.0, max=1.0)
+    __annotations__['tile_y_smoothness'] = FloatProperty(name="Smoothness", default=0.5, min=0.0, max=1.0)
+    __annotations__['tile_y_contrast'] = FloatProperty(name="Contrast", default=0.5, min=0.0, max=1.0)
 
 class VIVID_OT_bake_delit(Operator):
     bl_idname = "vivid.bake_delit"
-    bl_label = "Bake Delit Texture"
-    bl_description = "Cycles diffuse-color bake to a new image in the 'Delit' node"
+    bl_label = "Process Textures"
+    bl_description = "Process textures (de-lighting pipeline). Outputs will be saved under ProcessTextures."
 
     def execute(self, context):
         s = getattr(context.scene, "vivid_light_removal", None)
         if not s:
             self.report({'ERROR'}, "Light Removal settings not found on scene.")
             return {'CANCELLED'}
+
+        # Clean ProcessTextures and local bake logs/settings before processing
+        try:
+            root, bake_mesh, _ = _folders()
+            process_dir = os.path.join(root, "ProcessTextures")
+            _clean_dir(process_dir)
+            _clean_dir(os.path.join(bake_mesh, "bake_log"))
+            _clean_dir(os.path.join(bake_mesh, "bake_settings"))
+        except Exception:
+            pass
+
+        # Apply Delighter sliders to materials on Optimized object (Part1 only)
+        try:
+            apply_delighter_to_materials(s)
+        except Exception:
+            pass
 
         scene = context.scene
         # Switch engine
@@ -78,7 +152,7 @@ class VIVID_OT_bake_delit(Operator):
 
         base_name = _remove_suffix(obj.name, "_Optimized")
 
-        # UDIM detection from material names
+        # Helper retained only if needed later
         def _extract_udim(name: str):
             m = re.search(r"_(\d{4})(?:\D|$)", name or "")
             if m:
@@ -90,14 +164,14 @@ class VIVID_OT_bake_delit(Operator):
                     return None
             return None
 
-        slots = obj.material_slots
-        udims = []
-        for sl in slots:
-            m = getattr(sl, 'material', None)
-            u = _extract_udim(m.name) if m and getattr(m, 'name', None) else None
-            if u:
-                udims.append(u)
-        udim_mode = len(set(udims)) >= 1
+        # Detect UDIM tiles from geometry instead of material names
+        # Returns list of (u,v) offsets
+        uv_tiles = []
+        try:
+            uv_tiles = _udim_tiles_from_object(obj)
+        except Exception:
+            uv_tiles = []
+        udim_mode = len(uv_tiles) > 1 or (len(uv_tiles) == 1 and uv_tiles[0] != (0, 0))
 
         # Common pre-bake selection/visibility handling
         prev_hide = obj.hide_viewport
@@ -114,203 +188,186 @@ class VIVID_OT_bake_delit(Operator):
         except Exception:
             pass
 
-        _, _, bake_tex = _folders()
-        res = int(s.bake_resolution)
+        # Output directory: ProcessTextures next to the .blend OR Release mirror
+        root = bpy.path.abspath("//") or os.getcwd()
+        if bool(getattr(s, 'save_only_release', False)):
+            try:
+                release_dir = _release_mirror_dir(context)
+            except Exception:
+                release_dir = os.path.join(root, 'Release')
+            base_out_dir = release_dir
+        else:
+            base_out_dir = os.path.join(root, "ProcessTextures")
+        os.makedirs(base_out_dir, exist_ok=True)
+        # Use Designer bake resolution for texture processing to keep settings unified
+        try:
+            ds = getattr(context.scene, 'vivid_designer_bake', None)
+            res = int(ds.bake_resolution) if ds and getattr(ds, 'bake_resolution', None) else 4096
+        except Exception:
+            res = 4096
 
-        def ensure_delit(mat):
+        def ensure_target_tex_node(mat):
             if not (mat and mat.use_nodes and mat.node_tree):
                 return None, None
             nt = mat.node_tree
-            node = nt.nodes.get("Delit")
+            # If "Delight with Lightmap" is enabled, bake to Lightmap node; else use BaseColor
+            if getattr(s, 'de_light_with_lightmap', False):
+                node = nt.nodes.get("Lightmap")
+                if not node:
+                    node = nt.nodes.new("ShaderNodeTexImage")
+                    node.name = "Lightmap"
+                    node.label = "Lightmap"
+                    node.location = (-800, 100)
+            else:
+                node = nt.nodes.get("BaseColor") or nt.nodes.get("BaseColorOut") or nt.nodes.get("Delit")
             if not node:
                 node = nt.nodes.new("ShaderNodeTexImage")
-                node.name = "Delit"
-                node.label = "Delit"
+                if getattr(s, 'de_light_with_lightmap', False):
+                    node.name = "Lightmap"; node.label = "Lightmap"
+                else:
+                    node.name = "BaseColor"; node.label = "BaseColor"
                 node.location = (-800, 300)
             return nt, node
 
-        # Try to locate UDIM-specific DLBC files for better naming
-        dlbc_by_udim = {}
-        try:
-            udim_tex = _find_baked_textures_by_suffix_udim(bake_tex, base_name)
-            for u, maps in (udim_tex or {}).items():
-                if maps and maps.get('dlbc'):
-                    dlbc_by_udim[u] = maps['dlbc']
-        except Exception:
-            pass
-
         baked_files = []
-        if udim_mode and len(slots) > 0:
-            # Per-slot bake
-            for i, sl in enumerate(slots):
-                mat = sl.material
-                nt, delit_node = ensure_delit(mat)
-                if not (nt and delit_node):
-                    continue
-                udim = _extract_udim(mat.name) if mat and getattr(mat, 'name', None) else '1001'
-                # Compute UDIM tile offsets (1001 = (0,0), 1002 = (1,0), 1011 = (0,1), etc.)
-                try:
-                    udim_val = int(udim)
-                    t = udim_val - 1001
-                    u_off = t % 10
-                    v_off = t // 10
-                except Exception:
-                    u_off = 0; v_off = 0
-                img_name = f"{base_name}_Delit_{udim}"
-                img = bpy.data.images.get(img_name)
-                if img is None:
-                    img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
+        def bake_for_material(target_material: bpy.types.Material, out_dir: str, part_suffix: str = None):
+            # Assign material to all slots temporarily
+            original_mats = [sl.material for sl in obj.material_slots]
+            try:
+                if len(obj.material_slots) == 0:
+                    obj.data.materials.append(target_material)
                 else:
-                    try:
-                        if getattr(img, "size", None) and (img.size[0] != res or img.size[1] != res):
-                            img.scale(res, res)
-                    except Exception:
-                        try:
-                            bpy.data.images.remove(img)
-                        except Exception:
-                            pass
-                        img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
-                try:
-                    img.source = 'GENERATED'
-                except Exception:
-                    pass
-                delit_node.image = img
-                try:
-                    delit_node.image.colorspace_settings.name = "sRGB"
-                except Exception:
-                    pass
-                # Make material active to ensure correct node context
-                obj.active_material_index = i
-                nt.nodes.active = delit_node
-
-                # Temporarily offset UVs for faces in this material slot that live in this UDIM tile
+                    for i in range(len(obj.material_slots)):
+                        obj.material_slots[i].material = target_material
+                # Prepare image node on active material
+                nt, tex_node = ensure_target_tex_node(target_material)
+                if not (nt and tex_node):
+                    return []
+                baked = []
+                # Determine tiles to bake
+                tiles = uv_tiles if udim_mode else [(0,0)]
                 me = obj.data
                 uv_layer = me.uv_layers.active if hasattr(me, 'uv_layers') and me.uv_layers.active else None
-                saved_uvs = []
-                if uv_layer and me.polygons and me.loops:
-                    # Ensure object mode for direct UV edits
+                for (u_off, v_off) in tiles:
+                    udim_num = 1001 + u_off + v_off*10
+                    # Name images based on target node to avoid confusion
+                    bake_target = 'Lightmap' if getattr(s, 'de_light_with_lightmap', False) else 'BaseColor'
+                    img_name = f"{base_name}_{bake_target}_{udim_num}"
+                    if part_suffix:
+                        img_name = f"{base_name}_{part_suffix}_{bake_target}_{udim_num}"
+                    img = bpy.data.images.get(img_name)
+                    if img is None:
+                        img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
+                    else:
+                        try:
+                            if getattr(img, "size", None) and (img.size[0] != res or img.size[1] != res):
+                                img.scale(res, res)
+                        except Exception:
+                            try:
+                                bpy.data.images.remove(img)
+                            except Exception:
+                                pass
+                            img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
                     try:
-                        if obj.mode != 'OBJECT':
-                            bpy.ops.object.mode_set(mode='OBJECT')
+                        img.source = 'GENERATED'
                     except Exception:
                         pass
+                    tex_node.image = img
                     try:
-                        for poly in me.polygons:
-                            if poly.material_index != i:
-                                continue
-                            for li in poly.loop_indices:
-                                luv = uv_layer.data[li].uv
-                                # Only offset loops that are in the UDIM tile
-                                if int(math.floor(luv.x)) == u_off and int(math.floor(luv.y)) == v_off:
-                                    saved_uvs.append((li, luv.x, luv.y))
-                                    uv_layer.data[li].uv.x = luv.x - u_off
-                                    uv_layer.data[li].uv.y = luv.y - v_off
+                        tex_node.image.colorspace_settings.name = "sRGB"
                     except Exception:
-                        saved_uvs = []
+                        pass
+                    nt.nodes.active = tex_node
 
-                # Bake
-                try:
-                    bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, target='IMAGE_TEXTURES', use_clear=True)
-                except Exception as e:
-                    # Restore UVs on failure
+                    # Offset UVs for faces in this tile
+                    saved_uvs = []
+                    if uv_layer and me.polygons and me.loops:
+                        try:
+                            if obj.mode != 'OBJECT':
+                                bpy.ops.object.mode_set(mode='OBJECT')
+                        except Exception:
+                            pass
+                        try:
+                            for poly in me.polygons:
+                                for li in poly.loop_indices:
+                                    luv = uv_layer.data[li].uv
+                                    if int(math.floor(luv.x)) == u_off and int(math.floor(luv.y)) == v_off:
+                                        saved_uvs.append((li, luv.x, luv.y))
+                                        uv_layer.data[li].uv.x = luv.x - u_off
+                                        uv_layer.data[li].uv.y = luv.y - v_off
+                        except Exception:
+                            saved_uvs = []
+                    # Bake
+                    try:
+                        if getattr(s, 'de_light_with_lightmap', False):
+                            # Bake only Direct + Indirect, no color for Lightmap target
+                            bpy.ops.object.bake(type='DIFFUSE', pass_filter={'DIRECT','INDIRECT'}, target='IMAGE_TEXTURES', use_clear=True)
+                        else:
+                            bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, target='IMAGE_TEXTURES', use_clear=True)
+                    except Exception as e:
+                        try:
+                            for li, ux, uy in saved_uvs:
+                                uv_layer.data[li].uv.x = ux
+                                uv_layer.data[li].uv.y = uy
+                        except Exception:
+                            pass
+                        raise e
+                    # Restore UVs
                     try:
                         for li, ux, uy in saved_uvs:
                             uv_layer.data[li].uv.x = ux
                             uv_layer.data[li].uv.y = uy
                     except Exception:
                         pass
-                    if prev_scene_denoise is not None: scene.cycles.use_denoising = prev_scene_denoise
-                    if prev_layer_denoise is not None: context.view_layer.cycles.use_denoising = prev_layer_denoise
-                    self.report({'ERROR'}, f"Bake failed (UDIM {udim}): {e}")
-                    return {'CANCELLED'}
-
-                # Restore UVs after bake
+                    # Save
+                    udim_str = f"{udim_num}"
+                    outfile = os.path.join(out_dir, f"{base_name}_BaseColor_{udim_str}.tif") if not part_suffix else os.path.join(out_dir, f"{base_name}_{part_suffix}_BaseColor_{udim_str}.tif")
+                    # Lightmap bake does not need saving externally according to requirements
+                    if getattr(s, 'de_light_with_lightmap', False):
+                        # Skip saving to disk for Lightmap target
+                        baked.append(f"<baked:Lightmap:{udim_str}>")
+                        continue
+                    os.makedirs(os.path.dirname(outfile), exist_ok=True)
+                    img.filepath_raw = outfile
+                    img.file_format = 'TIFF'
+                    try:
+                        img.save()
+                    except Exception as e:
+                        self.report({'ERROR'}, f"Failed to save BaseColor image ({udim_str}): {e}")
+                    baked.append(outfile)
+                return baked
+            finally:
+                # restore materials
                 try:
-                    for li, ux, uy in saved_uvs:
-                        uv_layer.data[li].uv.x = ux
-                        uv_layer.data[li].uv.y = uy
+                    if original_mats:
+                        for i in range(min(len(obj.material_slots), len(original_mats))):
+                            obj.material_slots[i].material = original_mats[i]
                 except Exception:
                     pass
 
-                # Save per-UDIM image
-                dlbc = dlbc_by_udim.get(udim)
-                if dlbc:
-                    outfile = re.sub(r"(?i)_dlbc(\.[^\.]+)?$", f"_Delit_{udim}.png", dlbc)
-                    if outfile == dlbc:
-                        outfile = os.path.join(bake_tex, f"{base_name}_Delit_{udim}.png")
-                else:
-                    outfile = os.path.join(bake_tex, f"{base_name}_Delit_{udim}.png")
-                os.makedirs(os.path.dirname(outfile), exist_ok=True)
-                img.filepath_raw = outfile
-                img.file_format = 'PNG'
-                try:
-                    img.save()
-                except Exception as e:
-                    self.report({'ERROR'}, f"Failed to save Delit image ({udim}): {e}")
-                baked_files.append(outfile)
-            msg = ", ".join([os.path.basename(x) for x in baked_files]) if baked_files else "<none>"
-            self.report({'INFO'}, f"Delit baked (UDIM): {msg}")
-        else:
-            # Single bake
-            mat = obj.active_material or (obj.material_slots[0].material if obj.material_slots else None)
-            if not mat or not mat.use_nodes or not mat.node_tree:
-                self.report({'ERROR'}, "Optimized object's material is missing or has no nodes.")
+        # Main material on object
+        baked_files.extend(bake_for_material(obj.active_material or (obj.material_slots[0].material if obj.material_slots else None), base_out_dir))
+
+        # Alternate materials: base_name_Part# created by baking procedure
+        import re
+        alt_mats = []
+        pat = re.compile(rf"^{re.escape(base_name)}_Part\d+$")
+        for m in bpy.data.materials:
+            if pat.match(m.name):
+                alt_mats.append(m)
+        for m in sorted(alt_mats, key=lambda x: x.name):
+            part_token = m.name.split('_')[-1]  # PartX
+            out_dir = os.path.join(base_out_dir, part_token)
+            os.makedirs(out_dir, exist_ok=True)
+            try:
+                baked_files.extend(bake_for_material(m, out_dir, part_suffix=part_token))
+            except Exception as e:
+                self.report({'ERROR'}, f"Bake failed for {m.name}: {e}")
                 if prev_scene_denoise is not None: scene.cycles.use_denoising = prev_scene_denoise
                 if prev_layer_denoise is not None: context.view_layer.cycles.use_denoising = prev_layer_denoise
                 return {'CANCELLED'}
-            nt = mat.node_tree
-            delit_node = nt.nodes.get("Delit")
-            if not delit_node:
-                delit_node = nt.nodes.new("ShaderNodeTexImage")
-                delit_node.name = "Delit"
-                delit_node.label = "Delit"
-                delit_node.location = (-800, 300)
-            img_name = f"{base_name}_Delit"
-            img = bpy.data.images.get(img_name)
-            if img is None:
-                img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
-            else:
-                try:
-                    if getattr(img, "size", None) and (img.size[0] != res or img.size[1] != res):
-                        img.scale(res, res)
-                except Exception:
-                    try:
-                        bpy.data.images.remove(img)
-                    except Exception:
-                        pass
-                    img = bpy.data.images.new(img_name, width=res, height=res, alpha=True, float_buffer=False)
-            try:
-                img.source = 'GENERATED'
-            except Exception:
-                pass
-            delit_node.image = img
-            try:
-                delit_node.image.colorspace_settings.name = "sRGB"
-            except Exception:
-                pass
-            nt.nodes.active = delit_node
-            try:
-                bpy.ops.object.bake(type='DIFFUSE', pass_filter={'COLOR'}, target='IMAGE_TEXTURES', use_clear=True)
-            except Exception as e:
-                if prev_scene_denoise is not None: scene.cycles.use_denoising = prev_scene_denoise
-                if prev_layer_denoise is not None: context.view_layer.cycles.use_denoising = prev_layer_denoise
-                self.report({'ERROR'}, f"Bake failed: {e}")
-                return {'CANCELLED'}
-            dlbc, _, _, _ = _find_baked_textures_ex(bake_tex)
-            if dlbc:
-                outfile = re.sub(r"(?i)_dlbc(\.[^\.]+)?$", "_Delit.png", dlbc)
-                if outfile == dlbc:
-                    outfile = os.path.join(bake_tex, f"{base_name}_Delit.png")
-            else:
-                outfile = os.path.join(bake_tex, f"{base_name}_Delit.png")
-            os.makedirs(os.path.dirname(outfile), exist_ok=True)
-            img.filepath_raw = outfile
-            img.file_format = 'PNG'
-            try:
-                img.save()
-            except Exception as e:
-                self.report({'ERROR'}, f"Failed to save Delit image: {e}")
-            self.report({'INFO'}, f"Delit baked → {outfile}")
+        msg = ", ".join([os.path.basename(x) for x in baked_files]) if baked_files else "<none>"
+        self.report({'INFO'}, f"Processed: {msg}")
 
         # restore visibility and denoise
         try:
@@ -321,6 +378,66 @@ class VIVID_OT_bake_delit(Operator):
         if prev_scene_denoise is not None: scene.cycles.use_denoising = prev_scene_denoise
         if prev_layer_denoise is not None: context.view_layer.cycles.use_denoising = prev_layer_denoise
         return {'FINISHED'}
+
+
+def apply_delighter_to_materials(s):
+    """Apply UI slider values to the DelighterGroup of eligible materials.
+    Eligible = assigned materials on the Optimized object whose names are either:
+      - <Object>_<UDIM>
+      - <Object>_Part1_<UDIM> (include Part1)
+      - Any material without a _Part# segment
+    Exclude Part2 and above.
+    """
+    import re
+    obj = _find_optimized_object()
+    if not obj or obj.type != 'MESH':
+        return
+    mats = [sl.material for sl in obj.material_slots if sl.material]
+    part_pat = re.compile(r"_Part(\d+)(?:_|$)")
+    for m in mats:
+        try:
+            # Determine part index if present
+            part_idx = None
+            mt = part_pat.search(m.name)
+            if mt:
+                try:
+                    part_idx = int(mt.group(1))
+                except Exception:
+                    part_idx = None
+            # Skip Part >= 2; include None and Part1
+            if part_idx is not None and part_idx >= 2:
+                continue
+            if not (m.use_nodes and m.node_tree):
+                continue
+            nt = m.node_tree
+            # Find a group node named DelighterGroup
+            target = None
+            for n in nt.nodes:
+                if getattr(n, 'type', '') == 'GROUP' and (n.name == 'DelighterGroup' or (getattr(n, 'node_tree', None) and getattr(n.node_tree, 'name', '') == 'DelighterGroup')):
+                    target = n
+                    break
+            if not target:
+                continue
+            def set_input(name, val):
+                try:
+                    sock = target.inputs.get(name)
+                    if sock is not None and hasattr(sock, 'default_value'):
+                        sock.default_value = float(val)
+                except Exception:
+                    pass
+            set_input('Divide AO', getattr(s, 'divide_ao', 0.3))
+            set_input('Divide R', getattr(s, 'divide_r', 0.0))
+            set_input('Divide G', getattr(s, 'divide_g', 1.0))
+            set_input('Divide B', getattr(s, 'divide_b', 0.0))
+            set_input('Invert R', getattr(s, 'invert_r', 0.0))
+            set_input('Invert G', getattr(s, 'invert_g', 0.0))
+            set_input('Invert B', getattr(s, 'invert_b', 0.0))
+            if getattr(s, 'de_light_with_lightmap', False):
+                set_input('Divide Lightmap', getattr(s, 'divide_lightmap', 0.0))
+                set_input('Lightmap Brightness', getattr(s, 'lightmap_brightness', 0.0))
+                set_input('Lightmap Contrast', getattr(s, 'lightmap_contrast', 0.0))
+        except Exception:
+            pass
         
 CLASSES = (VIVID_LightRemovalSettings, VIVID_OT_bake_delit)
 

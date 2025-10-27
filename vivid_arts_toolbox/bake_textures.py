@@ -5,9 +5,11 @@ import json
 import math
 import time
 import subprocess
+import shutil
 from pathlib import Path
+import re
 from bpy.types import Operator, PropertyGroup
-from bpy.props import BoolProperty, PointerProperty, EnumProperty
+from bpy.props import BoolProperty, PointerProperty, EnumProperty, StringProperty, FloatProperty
 
 # ------------------------------------------------------------
 # Defaults & Paths
@@ -18,20 +20,43 @@ def _default_baker_path():
 def _blend_dir():
     return bpy.path.abspath("//")
 
-def _addon_dir():
-    # Folder where this file lives (the vivid_arts_toolbox package directory)
-    return os.path.dirname(os.path.abspath(__file__))
+# _addon_dir was used for legacy resource lookup; no longer needed
 
 def _folders():
-    root = _blend_dir()
-    bake_mesh = os.path.join(root, "BakeMesh")
-    bake_tex = os.path.join(root, "BakeTextures")
-    return root, bake_mesh, bake_tex
+    # Centralized via utils.project_dirs()
+    from .utils import project_dirs
+    try:
+        root_p, bake_mesh_p, bake_tex_p = project_dirs()
+        return str(root_p), str(bake_mesh_p), str(bake_tex_p)
+    except Exception:
+        # Fallback to // if unsaved; maintain previous behavior for unsaved scenarios
+        root = _blend_dir()
+        bake_mesh = os.path.join(root, "BakeMesh")
+        bake_tex = os.path.join(root, "BakeTextures")
+        return root, bake_mesh, bake_tex
 
 def _ensure_outdir():
     root, bake_mesh, bake_tex = _folders()
     os.makedirs(bake_tex, exist_ok=True)
     return root, bake_mesh, bake_tex
+
+def _clean_dir(path: str):
+    """Delete all contents of the given directory, preserving the directory itself."""
+    try:
+        if not path:
+            return
+        os.makedirs(path, exist_ok=True)
+        for name in os.listdir(path):
+            p = os.path.join(path, name)
+            try:
+                if os.path.isfile(p) or os.path.islink(p):
+                    os.remove(p)
+                elif os.path.isdir(p):
+                    shutil.rmtree(p)
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 # ------------------------------------------------------------
 # File discovery
@@ -46,12 +71,58 @@ def _glob_one(patterns, directory):
     cands.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return str(cands[0])
 
+def _diffuse_for_high(high_path: str, directory: str):
+    """Find a diffuse/albedo image matching a HighPoly base name and allowing tokens like u0_v0 or 1001
+    between the base and the map name. Returns latest by mtime or None."""
+    try:
+        if not high_path:
+            return None
+        base = Path(high_path).stem  # e.g., KAT_Cliff_Short_01_HighPoly
+        exts = ["png","jpg","jpeg","tif","tiff","exr","tga"]
+        # Prefer explicit "..._..._diffuse" allowing tokens between base and diffuse (e.g., u0_v0, 1001)
+        patterns_specific = []
+        # base_*_diffuse.ext then base_diffuse.ext
+        for ext in exts:
+            patterns_specific.append(f"{base}_*_diffuse.{ext}")
+        for ext in exts:
+            patterns_specific.append(f"{base}_diffuse.{ext}")
+        cand = _glob_one(patterns_specific, directory)
+        if cand:
+            return cand
+        # As a last resort, allow any image beginning with base (no map filter)
+        patterns_loose = [f"{base}.{ext}" for ext in exts] + [f"{base}_*.{ext}" for ext in exts]
+        return _glob_one(patterns_loose, directory)
+    except Exception:
+        return None
+
 def _find_inputs(bake_mesh_dir):
     low  = _glob_one(["*_Optimized.fbx", "*_optimized.fbx"], bake_mesh_dir)
     high = _glob_one(["*_HighPoly.fbx", "*_highpoly.fbx", "*_HP.fbx"], bake_mesh_dir)
     cage = _glob_one(["*_Cage.fbx", "*_cage.fbx"], bake_mesh_dir)
-    diff = _glob_one(["*_u0_v0_diffuse.png", "*_u0_v0_diffuse.*", "*diffuse.*"], bake_mesh_dir)
-    return {"low": low, "high": high, "cage": cage, "diffuse": diff}
+    # TextureTransfer source texture (diffuse/albedo). Prefer textures that start with the HighPoly base name
+    # and allow extra tokens like UDIM (1001) or u0_v0 before the map name.
+    # Only consider image files for the TextureTransfer source (avoid matching FBX)
+    diff = _diffuse_for_high(high, bake_mesh_dir)
+    if not diff:
+        diff = _glob_one([
+            "*_u0_v0_diffuse.png", "*_u0_v0_diffuse.jpg", "*_u0_v0_diffuse.jpeg", "*_u0_v0_diffuse.tif", "*_u0_v0_diffuse.tiff", "*_u0_v0_diffuse.exr", "*_u0_v0_diffuse.tga",
+            "*diffuse.png", "*diffuse.jpg", "*diffuse.jpeg", "*diffuse.tif", "*diffuse.tiff", "*diffuse.exr", "*diffuse.tga",
+            # Broad fallbacks (kept for legacy cases)
+            "*_HighPoly.png", "*_HighPoly.jpg", "*_HighPoly.jpeg", "*_HighPoly.tif", "*_HighPoly.tiff", "*_HighPoly.exr", "*_HighPoly.tga",
+            "*_highpoly.png", "*_highpoly.jpg", "*_highpoly.jpeg", "*_highpoly.tif", "*_highpoly.tiff", "*_highpoly.exr", "*_highpoly.tga",
+        ], bake_mesh_dir)
+    # Gather additional _Part#_HighPoly FBXs
+    high_parts = []
+    try:
+        pdir = Path(bake_mesh_dir)
+        import re
+        for p in sorted(pdir.glob("*_Part*_HighPoly.fbx")):
+            m = re.search(r"_Part(\d+)_HighPoly\\.fbx$", p.name, re.IGNORECASE)
+            if m:
+                high_parts.append((f"Part{m.group(1)}", str(p)))
+    except Exception:
+        pass
+    return {"low": low, "high": high, "cage": cage, "diffuse": diff, "high_parts": high_parts}
 
 # ------------------------------------------------------------
 # JSON patching (paths + resolution)
@@ -82,9 +153,22 @@ def _update_json_paths(data, files_map, output_dir):
     # CommonProjection dictionary
     cp = data.get("CommonProjection")
     if isinstance(cp, dict):
+        # High poly: require explicit replacement; otherwise blank to avoid stale template paths
         if files_map.get("high"):
             cp["high_scene_paths"] = [files_map["high"]]
-        _set_if_present(cp, "cage_scene_path", files_map.get("cage"))
+        elif "high_scene_paths" in cp:
+            cp["high_scene_paths"] = []
+        # Cage: optional; blank if not provided to avoid stale template paths
+        if files_map.get("cage"):
+            cp["cage_scene_path"] = files_map["cage"]
+        elif "cage_scene_path" in cp:
+            cp["cage_scene_path"] = ""
+        # Toggle cage usage based on presence of a valid cage file
+        try:
+            use_cage = bool(files_map.get("cage") and os.path.isfile(files_map.get("cage", "")))
+        except Exception:
+            use_cage = False
+        cp["use_cage"] = use_cage
 
     # Optional 'output' block normalization
     out = data.get("output")
@@ -119,10 +203,10 @@ def _update_json_paths(data, files_map, output_dir):
                 if v.lower().endswith(".fbx"):
                     if "low" in lk and files_map.get("low"):
                         params[k] = files_map["low"]
-                    elif "high" in lk and files_map.get("high"):
-                        params[k] = files_map["high"]
-                    elif "cage" in lk and files_map.get("cage"):
-                        params[k] = files_map["cage"]
+                    elif "high" in lk:
+                        params[k] = files_map.get("high", "")
+                    elif "cage" in lk:
+                        params[k] = files_map.get("cage", "")
 
     for baker in data.get("bakers", []):
         if not isinstance(baker, dict):
@@ -169,7 +253,7 @@ def _apply_resolution(data, res_px):
             if isinstance(baker.get("commonOutputParameters"), dict):
                 _apply_resolution_anywhere(baker["commonOutputParameters"], res_px)
 
-def _load_and_patch_json(src_json, files_map, output_dir, dest_json, res_px):
+def _load_and_patch_json(src_json, files_map, output_dir, dest_json, res_px, settings=None):
     with open(src_json, "r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -179,6 +263,40 @@ def _load_and_patch_json(src_json, files_map, output_dir, dest_json, res_px):
     # Resolution
     if res_px:
         _apply_resolution(data, res_px)
+
+    # Apply baker selections and AO params when provided
+    if settings is not None:
+        try:
+            toggles = {
+                'Displacement': bool(getattr(settings, 'enable_displacement', True)),
+                'AOWide':       bool(getattr(settings, 'enable_aowide', True)),
+                'NormalOS':     bool(getattr(settings, 'enable_normalos', True)),
+                'Thickness':    bool(getattr(settings, 'enable_thickness', False)),
+                'Curvature':    bool(getattr(settings, 'enable_curvature', False)),
+                'BentNormalOS': bool(getattr(settings, 'enable_bentnormalos', False)),
+                'Position':     bool(getattr(settings, 'enable_position', False)),
+            }
+            ao_max = float(getattr(settings, 'ao_secondary_max_distance', 0.04))
+        except Exception:
+            toggles = {}
+            ao_max = None
+
+        for baker in data.get('bakers', []) or []:
+            if not isinstance(baker, dict):
+                continue
+            ident = baker.get('identifier') or ''
+            params = baker.get('parameters')
+            if not isinstance(params, dict):
+                continue
+            # Toggle known optional bakers; force others on
+            if ident in toggles:
+                params['is_selected'] = bool(toggles[ident])
+            else:
+                # Always keep required/default bakers on
+                params['is_selected'] = True
+            # AO slider override
+            if ident == 'AO' and ao_max is not None:
+                params['secondary.max_distance'] = ao_max
 
     # Save generated JSON
     with open(dest_json, "w", encoding="utf-8") as f:
@@ -236,6 +354,67 @@ def _apply_udim_to_json(json_path, udim_tiles):
     return dest_json
 
 # ------------------------------------------------------------
+# Multi-highpoly helpers
+# ------------------------------------------------------------
+def _rename_bake_outputs_with_part(output_dir, part_token):
+    """
+    Normalize Part# filenames to the new convention:
+      (objectname)_(Part#)_(udim)_(bakername)
+
+    Handles these cases generically (no hard-coded baker names):
+    - Old style: (objectname)_(udim)_(Part#)_(bakername)  → move Part# before UDIM
+    - No part token: (objectname)_(udim)_(bakername)      → insert Part# before UDIM
+    - Part token already in object segment (anywhere)     → ensure exactly one Part# right before UDIM
+    """
+    try:
+        if not os.path.isdir(output_dir):
+            return
+
+        def is_udim(tok: str) -> bool:
+            return tok.isdigit() and len(tok) == 4 and int(tok) >= 1001
+
+        for fn in os.listdir(output_dir):
+            src = os.path.join(output_dir, fn)
+            if not os.path.isfile(src):
+                continue
+            name, ext = os.path.splitext(fn)
+            parts = name.split('_')
+            if len(parts) < 3:
+                continue
+
+            # Case A: ... _ <udim> _ <baker>
+            if is_udim(parts[-2]):
+                baker = parts[-1]
+                udim = parts[-2]
+                obj_tokens = parts[:-2]
+                # Remove any existing part token in obj tokens
+                obj_tokens = [t for t in obj_tokens if t != part_token]
+                new_parts = obj_tokens + [part_token, udim, baker]
+                new_name = '_'.join(new_parts) + ext
+            # Case B: ... _ <Part#> _ <baker> with udim at -3 (legacy)
+            elif len(parts) >= 4 and parts[-2] == part_token and is_udim(parts[-3]):
+                baker = parts[-1]
+                udim = parts[-3]
+                obj_tokens = parts[:-3]
+                obj_tokens = [t for t in obj_tokens if t != part_token]
+                new_parts = obj_tokens + [part_token, udim, baker]
+                new_name = '_'.join(new_parts) + ext
+            else:
+                # Unrecognized; skip
+                continue
+
+            if new_name != fn:
+                dst = os.path.join(output_dir, new_name)
+                try:
+                    os.replace(src, dst)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+# (Delighter material setup moved to operators/setup_materials.py)
+
+# ------------------------------------------------------------
 # Running the baker
 # ------------------------------------------------------------
 def _run_baker(exe_path, json_path, log_path, cwd, use_cpu=False):
@@ -248,21 +427,50 @@ def _run_baker(exe_path, json_path, log_path, cwd, use_cpu=False):
         log.write("\nReturn code: {}\n".format(p.returncode))
         return p.returncode
 
+def _warn_if_tiff_loader_error(log_path: str, operator=None):
+    """Scan a Substance baker log for common TIFF loader failures and print a helpful hint.
+    Triggers on messages like:
+      - Freeimage Error>> Error while opening TIFF: data is invalid. (format: TIFF)
+      - Failed to load image from path: <...>.tif(f)
+    """
+    try:
+        if not log_path or not os.path.isfile(log_path):
+            return
+        with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+            txt = f.read()
+        if not txt:
+            return
+        # Look for explicit TIFF loader errors or failed path ending in .tif/.tiff
+        pat = re.compile(r"Error while opening TIFF|Failed to load image from path\s*:\s*.*\.(?:tif|tiff)\b", re.IGNORECASE)
+        if pat.search(txt):
+            msg = (
+                "Designer/FreeImage had trouble loading a TIFF. Re-export as 24-bit RGB/BGR TIFF (no alpha), "
+                "use LZW or None compression, avoid BigTIFF/pyramids. PNG 8-bit sRGB can also work (but max 32k)."
+            )
+            # Print to Blender console and surface as operator warning when available
+            try:
+                print("[VIVID] WARNING:", msg)
+            except Exception:
+                pass
+            try:
+                if operator is not None and hasattr(operator, 'report'):
+                    operator.report({'WARNING'}, msg)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
 # ------------------------------------------------------------
 # Export scope (only bake exports)
 # ------------------------------------------------------------
 def _try_export_bake_meshes_only():
-    for ns, op in [("vivid", "export_for_designer"), ("vivid", "export_asset")]:
-        try:
-            ns_ops = getattr(bpy.ops, ns, None)
-            if ns_ops:
-                fn = getattr(ns_ops, op, None)
-                if fn and fn.poll():
-                    fn()
-                    return True
-        except Exception:
-            pass
-    # Fallback: export Optimized and Cage locally into BakeMesh
+    """Export only bake meshes (Optimized, Cage, HighPoly, Part#_HighPoly) to BakeMesh.
+
+    We intentionally do NOT call the Cinema export operator here. Baking should not
+    trigger Cinema exports. If a dedicated 'vivid.export_for_designer' operator is
+    introduced in the future, we can prefer that here; until then, we always use
+    the local FBX export routine.
+    """
     try:
         root, bake_mesh, bake_tex = _folders()
         return _export_bake_meshes_local(bake_mesh)
@@ -279,7 +487,7 @@ def _export_bake_meshes_local(bake_mesh_dir):
     - Restore prior visibility state after export
     """
     # Find targets
-    opt = None; cage = None
+    opt = None; cage = None; highs = []
     for o in bpy.data.objects:
         if o.type != 'MESH':
             continue
@@ -287,8 +495,15 @@ def _export_bake_meshes_local(bake_mesh_dir):
             opt = o
         elif o.name.endswith('_Cage') and not cage:
             cage = o
-        if opt and cage:
-            break
+        elif o.name.endswith('_HighPoly'):
+            highs.append(o)
+        else:
+            try:
+                import re
+                if re.search(r"_Part\d+_HighPoly$", o.name):
+                    highs.append(o)
+            except Exception:
+                pass
 
     if not opt:
         return False
@@ -300,6 +515,9 @@ def _export_bake_meshes_local(bake_mesh_dir):
     items = [(opt, os.path.join(bake_mesh_dir, f"{base}_Optimized.fbx"))]
     if cage:
         items.append((cage, os.path.join(bake_mesh_dir, f"{base}_Cage.fbx")))
+    # Export all highpoly candidates
+    for hp in highs:
+        items.append((hp, os.path.join(bake_mesh_dir, f"{hp.name}.fbx")))
 
     # Helper: find the LayerCollection that maps to a given collection
     root_lc = bpy.context.view_layer.layer_collection
@@ -424,9 +642,9 @@ def _export_bake_meshes_local(bake_mesh_dir):
 
     return True
 
-# ------------------------------------------------------------
-# Material Setup
-# ------------------------------------------------------------
+"""Material setup helpers removed; see operators/setup_materials.py"""
+
+# Minimal helper retained for UDIM detection below
 def _find_optimized_object():
     obj = bpy.context.active_object
     if obj and obj.type == 'MESH' and obj.name.endswith("_Optimized"):
@@ -435,200 +653,6 @@ def _find_optimized_object():
         if o.type == 'MESH' and o.name.endswith("_Optimized"):
             return o
     return None
-
-def _remove_suffix(name: str, suffix: str):
-    return name[:-len(suffix)] if name.endswith(suffix) else name
-
-def _find_baked_textures(bake_tex_dir):
-    # BaseColor transfer (DLBC) and Normal maps from BakeTextures
-    img_norm = _glob_one(["*_Normal.*", "*_Normals.*"], bake_tex_dir)
-    img_dlbc = _glob_one(["*DLBC*.*", "*BaseColor*.*"], bake_tex_dir)
-    return img_dlbc, img_norm
-
-def _find_baked_textures_by_suffix(bake_tex_dir, base_name: str = None):
-    """Find baked textures by suffix only (basename flexible):
-    - DLBC    -> *_DLBC.*
-    - DLBN    -> *_DLBN.*
-    - DLAO    -> *_DLAO.*
-    - Normals -> *_Normal(s).* (excludes Bent_Normals)
-    Prefers files whose name contains the current base_name (case-insensitive),
-    but will fall back to any match. Returns newest per category.
-    """
-    if not os.path.isdir(bake_tex_dir):
-        return None, None, None, None
-
-    exts = (".png", ".tga", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp", ".webp")
-    base_tokens = []
-    if base_name:
-        b = base_name.lower()
-        base_tokens = [b, b.replace(" ", "_")]
-
-    # Track preferred (contains base) and fallback (any) candidates separately
-    picked = {
-        "dlbc": {"pref": (None, -1), "any": (None, -1)},
-        "dlao": {"pref": (None, -1), "any": (None, -1)},
-        "dlbn": {"pref": (None, -1), "any": (None, -1)},
-        "normal": {"pref": (None, -1), "any": (None, -1)},
-    }
-
-    for fn in os.listdir(bake_tex_dir):
-        full = os.path.join(bake_tex_dir, fn)
-        lower = fn.lower()
-        if not lower.endswith(exts) or not os.path.isfile(full):
-            continue
-        name_no_ext, _ = os.path.splitext(lower)
-
-        try:
-            ts = os.stat(full).st_mtime
-        except Exception:
-            ts = 0
-
-        contains_base = any(bt in name_no_ext for bt in base_tokens) if base_tokens else False
-
-        def choose(cat: str, path: str, ts_val: float, prefer: bool):
-            key = "pref" if prefer else "any"
-            cur_path, cur_ts = picked[cat][key]
-            if ts_val > cur_ts:
-                picked[cat][key] = (path, ts_val)
-
-        if name_no_ext.endswith("_dlbc"):
-            choose("dlbc", full, ts, contains_base)
-        elif name_no_ext.endswith("_dlao"):
-            choose("dlao", full, ts, contains_base)
-        elif name_no_ext.endswith("_dlbn"):
-            choose("dlbn", full, ts, contains_base)
-        elif name_no_ext.endswith("_normal") or name_no_ext.endswith("_normals"):
-            # For normal map only, exclude bent normals
-            if not ("bent" in name_no_ext and "normal" in name_no_ext):
-                choose("normal", full, ts, contains_base)
-
-    def resolve(cat: str):
-        pref_path, pref_ts = picked[cat]["pref"]
-        any_path, any_ts = picked[cat]["any"]
-        return pref_path if pref_path else any_path
-
-    dlbc = resolve("dlbc")
-    dlao = resolve("dlao")
-    dlbn = resolve("dlbn")
-    normal = resolve("normal")
-    return dlbc, normal, dlao, dlbn
-
-def _extract_udim_token(text: str):
-    """Extract a UDIM numeric token like _1001, _1002 from a string; returns '1001' etc or None.
-    Only accepts values >= 1001.
-    """
-    try:
-        import re
-        m = re.search(r"_(\d{4})(?:\D|$)", text or "")
-        if m:
-            val = int(m.group(1))
-            if val >= 1001:
-                return str(val)
-    except Exception:
-        pass
-    return None
-
-def _find_baked_textures_by_suffix_udim(bake_tex_dir, base_name: str = None):
-    """Discover baked textures grouped by UDIM token per category.
-    Returns a dict: { udim: { 'dlbc': path or None, 'normal':..., 'dlao':..., 'dlbn':... } }
-    Prefers files containing base_name but will fall back to any; picks newest per (udim, category).
-    If no UDIM token found in a file, it is grouped under '1001' to support non-UDIM flows with {udim}=1001.
-    """
-    out = {}
-    if not os.path.isdir(bake_tex_dir):
-        return out
-    exts = (".png", ".tga", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp", ".webp")
-    base_tokens = []
-    if base_name:
-        b = base_name.lower()
-        base_tokens = [b, b.replace(" ", "_")]
-
-    def ensure_key(u):
-        if u not in out:
-            out[u] = {
-                'dlbc': (None, -1, False),
-                'dlao': (None, -1, False),
-                'dlbn': (None, -1, False),
-                'normal': (None, -1, False),
-            }
-
-    def consider(u, cat, path, ts, prefer):
-        cur_p, cur_t, cur_pref = out[u][cat]
-        # Prefer base-matching files; if equal preference, pick newest
-        if prefer and not cur_pref:
-            out[u][cat] = (path, ts, True)
-        elif prefer == cur_pref and ts > cur_t:
-            out[u][cat] = (path, ts, cur_pref)
-        elif not cur_p:
-            out[u][cat] = (path, ts, cur_pref)
-
-    for fn in os.listdir(bake_tex_dir):
-        full = os.path.join(bake_tex_dir, fn)
-        lower = fn.lower()
-        if not lower.endswith(exts) or not os.path.isfile(full):
-            continue
-        name_no_ext, _ = os.path.splitext(lower)
-        udim = _extract_udim_token(name_no_ext) or '1001'
-        contains_base = any(bt in name_no_ext for bt in base_tokens) if base_tokens else False
-        try:
-            ts = os.stat(full).st_mtime
-        except Exception:
-            ts = 0
-        ensure_key(udim)
-        if name_no_ext.endswith("_dlbc"):
-            consider(udim, 'dlbc', full, ts, contains_base)
-        elif name_no_ext.endswith("_dlao"):
-            consider(udim, 'dlao', full, ts, contains_base)
-        elif name_no_ext.endswith("_dlbn"):
-            consider(udim, 'dlbn', full, ts, contains_base)
-        elif name_no_ext.endswith("_normal") or name_no_ext.endswith("_normals"):
-            if not ("bent" in name_no_ext and "normal" in name_no_ext):
-                consider(udim, 'normal', full, ts, contains_base)
-
-    # Strip timestamps/prefer flags
-    simplified = {}
-    for u, cats in out.items():
-        simplified[u] = {k: v[0] for k, v in cats.items()}
-    return simplified
-
-def _ensure_material(obj, base_name, dlbc_path, normal_path):
-    mat_name = base_name
-    mat = bpy.data.materials.get(mat_name)
-    if not mat:
-        mat = bpy.data.materials.new(mat_name)
-    mat.use_nodes = True
-    nt = mat.node_tree; nodes = nt.nodes; links = nt.links
-    for n in list(nodes): nodes.remove(n)
-
-    out = nodes.new("ShaderNodeOutputMaterial"); out.location = (400, 0)
-    bsdf = nodes.new("ShaderNodeBsdfPrincipled"); bsdf.location = (0, 0)
-    bsdf.inputs["Roughness"].default_value = 0.9
-    links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
-
-    if dlbc_path and os.path.isfile(dlbc_path):
-        img_node = nodes.new("ShaderNodeTexImage"); img_node.location = (-400, 100)
-        try: img_node.image = bpy.data.images.load(dlbc_path, check_existing=True)
-        except Exception: img_node.image = None
-        if img_node.image:
-            img_node.image.colorspace_settings.name = "sRGB"
-            links.new(img_node.outputs["Color"], bsdf.inputs["Base Color"])
-
-    if normal_path and os.path.isfile(normal_path):
-        nrm_img = nodes.new("ShaderNodeTexImage"); nrm_img.location = (-600, -200)
-        try: nrm_img.image = bpy.data.images.load(normal_path, check_existing=True)
-        except Exception: nrm_img.image = None
-        if nrm_img.image:
-            nrm_img.image.colorspace_settings.name = "Non-Color"
-        nrm = nodes.new("ShaderNodeNormalMap"); nrm.location = (-200, -200)
-        links.new(nrm_img.outputs["Color"], nrm.inputs["Color"])
-        links.new(nrm.outputs["Normal"], bsdf.inputs["Normal"])
-
-    if obj.data.materials:
-        obj.data.materials[0] = mat
-    else:
-        obj.data.materials.append(mat)
-
-    return mat
 
 # ------------------------------------------------------------
 # UDIM helpers
@@ -643,9 +667,21 @@ def _udim_tiles_from_object(obj) -> list:
         if not me or not getattr(me, 'uv_layers', None) or len(me.uv_layers) == 0:
             return []
         uv_layer = me.uv_layers.active or me.uv_layers[0]
+        EPS = 1e-6
+        def _tile_index(x: float) -> int:
+            """Map UV coordinate to UDIM tile index along one axis.
+            Treat exact positive-integer boundaries (>=1) within a tiny epsilon as belonging to the
+            previous tile so faces on the 0-1 edge don't incorrectly spill into the next UDIM tile.
+            Example: x == 1.0 -> tile 0; x == 2.0 -> tile 1; x == 0.0 stays tile 0.
+            """
+            n = math.floor(x)
+            # Only adjust when we're at (or extremely close to) a positive integer boundary >= 1
+            if x >= 0.0 and n >= 1 and (x - n) >= 0.0 and (x - n) < EPS:
+                x = x - EPS
+            return int(math.floor(x))
         for luv in uv_layer.data:
-            u = int(math.floor(luv.uv.x))
-            v = int(math.floor(luv.uv.y))
+            u = _tile_index(float(luv.uv.x))
+            v = _tile_index(float(luv.uv.y))
             tiles.add((u, v))
     except Exception:
         return []
@@ -680,8 +716,13 @@ class VIVID_DesignerBakeSettings(PropertyGroup):
     )
     __annotations__['setup_material'] = BoolProperty(
         name="Setup Material",
-        description="Create/assign a material on the _Optimized object using baked DLBC/Normal maps",
+        description="Create/assign a Delighter-based material on the _Optimized object using baked textures",
         default=True
+    )
+    __annotations__['ao_secondary_max_distance'] = FloatProperty(
+        name="AO Max Distance",
+        description="Controls AO baker secondary.max_distance in meters",
+        default=0.04, min=0.0, soft_max=1.0, step=0.01, precision=4
     )
     __annotations__['bake_resolution'] = EnumProperty(
         name="Bake Resolution",
@@ -694,6 +735,54 @@ class VIVID_DesignerBakeSettings(PropertyGroup):
         description="CPU (adds --cpu) or GPU (no flag) for Substance baker",
         items=_ENGINE_ITEMS,
         default="CPU",
+    )
+    __annotations__['custom_highpoly_dir'] = StringProperty(
+        name="Custom HighPoly",
+        description="Optional folder to look for HighPoly FBX and textures instead of //BakeMesh",
+        subtype='DIR_PATH',
+        default=""
+    )
+    # Additional bakers UI toggle
+    __annotations__['show_additional_bakers'] = BoolProperty(
+        name="Show Additional Bakers",
+        description="Reveal additional optional bakers to include/exclude",
+        default=False
+    )
+    # Per-baker enable flags
+    __annotations__['enable_displacement'] = BoolProperty(
+        name="Displacement",
+        description="Enable Displacement baker",
+        default=True
+    )
+    __annotations__['enable_aowide'] = BoolProperty(
+        name="AOWide",
+        description="Enable AOWide baker",
+        default=True
+    )
+    __annotations__['enable_normalos'] = BoolProperty(
+        name="NormalOS",
+        description="Enable world-space NormalOS baker",
+        default=True
+    )
+    __annotations__['enable_thickness'] = BoolProperty(
+        name="Thickness",
+        description="Enable Thickness baker",
+        default=False
+    )
+    __annotations__['enable_curvature'] = BoolProperty(
+        name="Curvature",
+        description="Enable Curvature baker",
+        default=False
+    )
+    __annotations__['enable_bentnormalos'] = BoolProperty(
+        name="BentNormalOS",
+        description="Enable world-space BentNormalOS baker",
+        default=False
+    )
+    __annotations__['enable_position'] = BoolProperty(
+        name="Position",
+        description="Enable Position baker",
+        default=False
     )
 
 # ------------------------------------------------------------
@@ -718,25 +807,51 @@ class VIVID_OT_bake_designer(Operator):
             _try_export_bake_meshes_only()
 
         root, bake_mesh, bake_tex = _ensure_outdir()
+        # Clean BakeTextures and local log/settings folders to start fresh
+        try:
+            _clean_dir(bake_tex)
+            _clean_dir(os.path.join(bake_mesh, "bake_log"))
+            _clean_dir(os.path.join(bake_mesh, "bake_settings"))
+        except Exception:
+            pass
         if not os.path.isdir(bake_mesh):
             self.report({'ERROR'}, f"Missing BakeMesh folder: {bake_mesh}")
             return {'CANCELLED'}
 
-        files = _find_inputs(bake_mesh)
+        # Allow overriding HighPoly search directory via custom_highpoly_dir
+        high_src_dir = bake_mesh
+        if settings and getattr(settings, 'custom_highpoly_dir', ''):
+            cand = bpy.path.abspath(getattr(settings, 'custom_highpoly_dir', '')).strip()
+            if cand and os.path.isdir(cand):
+                high_src_dir = cand
+        files = _find_inputs(high_src_dir)
+        # Always keep low/high/cage from local BakeMesh if not found in override dir
+        if not files.get('low') or not os.path.isfile(files.get('low', '')):
+            files['low'] = _glob_one(["*_Optimized.fbx", "*_optimized.fbx"], bake_mesh)
+        if not files.get('high') or not os.path.isfile(files.get('high', '')):
+            files['high'] = _glob_one(["*_HighPoly.fbx", "*_highpoly.fbx", "*_HP.fbx"], bake_mesh)
+        if not files.get('cage') or not os.path.isfile(files.get('cage', '')):
+            files['cage'] = _glob_one(["*_Cage.fbx", "*_cage.fbx"], bake_mesh)
+        if not files.get('diffuse') or not os.path.isfile(files.get('diffuse', '')):
+            # Try again using the discovered HighPoly base for specificity
+            files['diffuse'] = _diffuse_for_high(files.get('high', ''), bake_mesh) or _glob_one([
+                "*_u0_v0_diffuse.png", "*_u0_v0_diffuse.jpg", "*_u0_v0_diffuse.jpeg", "*_u0_v0_diffuse.tif", "*_u0_v0_diffuse.tiff", "*_u0_v0_diffuse.exr", "*_u0_v0_diffuse.tga",
+                "*diffuse.png", "*diffuse.jpg", "*diffuse.jpeg", "*diffuse.tif", "*diffuse.tiff", "*diffuse.exr", "*diffuse.tga",
+                "*_HighPoly.png", "*_HighPoly.jpg", "*_HighPoly.jpeg", "*_HighPoly.tif", "*_HighPoly.tiff", "*_HighPoly.exr", "*_HighPoly.tga",
+                "*_highpoly.png", "*_highpoly.jpg", "*_highpoly.jpeg", "*_highpoly.tif", "*_highpoly.tiff", "*_highpoly.exr", "*_highpoly.tga",
+            ], bake_mesh)
         if not files.get("low"):
             self.report({'ERROR'}, "Missing required low mesh (e.g. *_Optimized.fbx) in BakeMesh.")
             return {'CANCELLED'}
+        if not files.get("high"):
+            self.report({'ERROR'}, "Missing required high mesh (e.g. *_HighPoly.fbx) in BakeMesh or override directory.")
+            return {'CANCELLED'}
 
-        # Always use the master preset shipped with the addon
-        addon_json = os.path.join(_addon_dir(), "bake_preset.json")
-        if os.path.isfile(addon_json):
-            main_json = addon_json
-        else:
-            # Fallback to project-local if addon copy is missing
-            main_json = os.path.join(bake_mesh, "bake_preset.json")
-
+        # Always use the master preset shipped with the addon (resources only)
+        from .utils import resource_or_legacy
+        main_json = str(resource_or_legacy("bake_preset.json"))
         if not os.path.isfile(main_json):
-            self.report({'ERROR'}, "Missing bake_preset.json (expected in addon folder or BakeMesh).")
+            self.report({'ERROR'}, "Missing bake_preset.json in add-on resources.")
             return {'CANCELLED'}
 
         # Resolution + engine
@@ -749,37 +864,85 @@ class VIVID_OT_bake_designer(Operator):
         # --- Start timer ---
         start_time = time.time()
 
-        # Patch + run a single JSON
-        log_path = os.path.join(bake_mesh, "bake_designer.log")
-        gen_main = os.path.join(bake_mesh, "_generated_bake_preset.json")
-        _load_and_patch_json(main_json, files, bake_tex, gen_main, res_px)
-
-        # UDIM detection from active *_Optimized object and JSON patching (uv_tiles, is_udim)
+        # Multi-highpoly: if _Part#_HighPoly FBXs exist, bake each into a subfolder
+        parts = files.get("high_parts") or []
+        base_name = None
         try:
             opt_obj = _find_optimized_object()
-            udim_tiles = _udim_tiles_from_object(opt_obj) if opt_obj else []
-            if udim_tiles and (len(udim_tiles) > 1 or udim_tiles != [(0, 0)]):
-                _apply_udim_to_json(gen_main, udim_tiles)
+            if opt_obj:
+                nm = opt_obj.name
+                base_name = nm[:-10] if nm.endswith('_Optimized') else nm
         except Exception:
-            pass
-        rc_total = _run_baker(exe_path, gen_main, log_path, cwd=bake_mesh, use_cpu=use_cpu)
+            base_name = None
+
+        rc_total = 0
+        # Ensure a dedicated log directory under BakeMesh
+        log_dir = os.path.join(bake_mesh, "bake_log")
+        os.makedirs(log_dir, exist_ok=True)
+        # Ensure a dedicated settings directory under BakeMesh for generated JSONs
+        settings_dir = os.path.join(bake_mesh, "bake_settings")
+        os.makedirs(settings_dir, exist_ok=True)
+        if parts:
+            for part_token, hp in parts:
+                out_dir = os.path.join(bake_tex, part_token)
+                os.makedirs(out_dir, exist_ok=True)
+                files_local = dict(files)
+                files_local['high'] = hp
+                log_path = os.path.join(log_dir, f"bake_{part_token}.log")
+                gen_json = os.path.join(settings_dir, f"_generated_bake_{part_token}.json")
+                _load_and_patch_json(main_json, files_local, out_dir, gen_json, res_px, settings=settings)
+                try:
+                    udim_tiles = _udim_tiles_from_object(opt_obj) if opt_obj else []
+                    if udim_tiles and (len(udim_tiles) > 1 or udim_tiles != [(0, 0)]):
+                        _apply_udim_to_json(gen_json, udim_tiles)
+                except Exception:
+                    pass
+                rc = _run_baker(exe_path, gen_json, log_path, cwd=bake_mesh, use_cpu=use_cpu)
+                # Surface helpful TIFF warning if Substance/FreeImage rejects the source
+                _warn_if_tiff_loader_error(log_path, operator=self)
+                rc_total = rc_total or rc
+                _rename_bake_outputs_with_part(out_dir, part_token)
+        else:
+            # Always bake into Part1 subfolder and include Part1 in filenames
+            # Patch + run a single JSON
+            part_dir = os.path.join(bake_tex, "Part1")
+            os.makedirs(part_dir, exist_ok=True)
+            log_path = os.path.join(log_dir, "bake_designer.log")
+            gen_main = os.path.join(settings_dir, "_generated_bake_preset.json")
+            _load_and_patch_json(main_json, files, part_dir, gen_main, res_px, settings=settings)
+
+            # UDIM detection from active *_Optimized object and JSON patching (uv_tiles, is_udim)
+            try:
+                opt_obj = _find_optimized_object()
+                udim_tiles = _udim_tiles_from_object(opt_obj) if opt_obj else []
+                if udim_tiles and (len(udim_tiles) > 1 or udim_tiles != [(0, 0)]):
+                    _apply_udim_to_json(gen_main, udim_tiles)
+            except Exception:
+                pass
+            rc_total = _run_baker(exe_path, gen_main, log_path, cwd=bake_mesh, use_cpu=use_cpu)
+            # Surface helpful TIFF warning if Substance/FreeImage rejects the source
+            _warn_if_tiff_loader_error(log_path, operator=self)
+            # Normalize filenames to (object)_(Part1)_(udim)_(baker)
+            _rename_bake_outputs_with_part(part_dir, "Part1")
 
         # --- Stop timer ---
         duration = time.time() - start_time
 
         
-        # Optional material setup (Delighter only)
+        # Optional material setup: call the dedicated operator (decoupled from this module)
         if settings and settings.setup_material:
-            opt_obj = _find_optimized_object()
-            if opt_obj:
-                _append_delighter_material(opt_obj, bake_tex)
-            else:
-                self.report({'WARNING'}, "No *_Optimized object found to assign material.")
+            try:
+                bpy.ops.vivid.setup_materials()
+            except Exception:
+                self.report({'WARNING'}, "Failed to run material setup operator.")
 
-        if rc_total != 0:
-            self.report({'WARNING'}, f"Designer baking finished with warnings/errors in {duration:.1f}s. See log: {log_path}")
+        if parts:
+            self.report({'INFO'}, f"Designer baking complete for {len(parts)} highpoly parts in {duration:.1f}s → {bake_tex}\\Part#")
         else:
-            self.report({'INFO'}, f"Designer baking complete in {duration:.1f}s → {bake_tex}")
+            if rc_total != 0:
+                self.report({'WARNING'}, f"Designer baking finished with warnings/errors in {duration:.1f}s. See log: {log_path}")
+            else:
+                self.report({'INFO'}, f"Designer baking complete in {duration:.1f}s → {bake_tex}")
 
         # Attempt to switch active 3D View(s) to Material Preview and Diffuse Color pass
         # (Safe no-op in background/headless mode or if properties unavailable.)
@@ -803,10 +966,13 @@ class VIVID_OT_bake_designer(Operator):
                                             pass
                                         # Set render pass if supported (usually affects Rendered / Material preview overlays)
                                         if hasattr(shading, 'render_pass'):
-                                            try:
-                                                shading.render_pass = 'DIFFUSE_COLOR'
-                                            except Exception:
-                                                pass
+                                            # Prefer Diffuse Color; fall back gracefully if enum differs
+                                            for choice in ('DIFFUSE_COLOR', 'DIFFUSE', 'COLOR'):
+                                                try:
+                                                    shading.render_pass = choice
+                                                    break
+                                                except Exception:
+                                                    continue
                             # We only need to modify the first VIEW_3D we encounter per window
                             break
         except Exception:
@@ -817,270 +983,7 @@ class VIVID_OT_bake_designer(Operator):
 
 
 
-# ------------------------------------------------------------
-# Delighter material import + setup (must run after baking)
-# ------------------------------------------------------------
-
-def _append_delighter_material(obj, bake_tex_dir):
-    """
-    Appends 'Delighter' material from Delighter.blend (bundled with addon)
-    and assigns baked textures:
-      - Node 'DLBC'      -> *_DLBC.*     (sRGB)
-      - Node 'DLAO'      -> *_DLAO.*     (Non-Color)
-      - Node 'DLBN'      -> *_DLBN.*     (Non-Color)
-      - Node 'Normals'   -> *_Normal(s).* (Non-Color, excludes Bent_Normals)
-    Replaces existing material slots with this material (keeps the same number of slots).
-    If the object has no slots, adds one. The material is copied and renamed to the object's
-    base name (object name without the "_Optimized" suffix).
-    """
-    if not obj or obj.type != 'MESH':
-        return
-
-    # Resolve base name from object (strip _Optimized suffix if present)
-    base_name = obj.name
-    if base_name.endswith("_Optimized"):
-        base_name = base_name[:-10]
-
-    # Resolve path to Delighter.blend next to this module
-    try:
-        pkg_dir = os.path.dirname(os.path.abspath(__file__))
-    except Exception:
-        pkg_dir = os.path.dirname(__file__)
-    blend_path = os.path.join(pkg_dir, "Delighter.blend")
-    if not os.path.isfile(blend_path):
-        print("[Delighter] Missing Delighter.blend")
-        return
-
-    # Discover textures, supporting UDIM groupings
-    udim_map = _find_baked_textures_by_suffix_udim(bake_tex_dir, base_name)
-    # Also compute single fallback set (non-UDIM)
-    dlbc_single, normal_single, dlao_single, dlbn_single = _find_baked_textures_by_suffix(bake_tex_dir, base_name)
-
-    # Append the material (re-use if already present)
-    src_name = "Delighter"
-    src_mat = bpy.data.materials.get(src_name)
-    if src_mat is None:
-        try:
-            with bpy.data.libraries.load(blend_path, link=False) as (data_from, data_to):
-                if src_name in (data_from.materials or []):
-                    data_to.materials = [src_name]
-            src_mat = bpy.data.materials.get(src_name)
-        except Exception as e:
-            print(f"[Delighter] Append failed: {e}")
-            return
-    if src_mat is None:
-        print("[Delighter] Could not get appended material")
-        return
-
-    def _norm_path(p: str) -> str:
-        try:
-            return bpy.path.abspath(os.path.normpath(p)).replace('\\', '/')
-        except Exception:
-            return p
-
-    def _find_existing_image_by_path(abs_path: str):
-        try:
-            target = os.path.normcase(bpy.path.abspath(abs_path))
-            for im in bpy.data.images:
-                try:
-                    cur = os.path.normcase(bpy.path.abspath(im.filepath or im.filepath_raw))
-                except Exception:
-                    cur = (im.filepath or im.filepath_raw or "")
-                if cur and cur == target:
-                    return im
-        except Exception:
-            pass
-        return None
-
-    def _overwrite_material_with_template(dst_mat: bpy.types.Material, template_mat: bpy.types.Material):
-        try:
-            dst_mat.use_nodes = True
-            dst_nt = dst_mat.node_tree
-            src_nt = template_mat.node_tree
-            if not (dst_nt and src_nt):
-                return
-            # Clear dst nodes
-            for n in list(dst_nt.nodes):
-                dst_nt.nodes.remove(n)
-            # Copy nodes
-            node_map = {}
-            for n in src_nt.nodes:
-                nn = dst_nt.nodes.new(type=n.bl_idname)
-                try:
-                    nn.name = n.name
-                except Exception:
-                    pass
-                nn.label = getattr(n, 'label', nn.label)
-                nn.location = getattr(n, 'location', (0, 0))
-                nn.width = getattr(n, 'width', nn.width)
-                nn.height = getattr(n, 'height', nn.height)
-                nn.hide = getattr(n, 'hide', False)
-                # Preserve node tree for Group nodes
-                try:
-                    if hasattr(nn, 'node_tree') and hasattr(n, 'node_tree'):
-                        nn.node_tree = n.node_tree
-                except Exception:
-                    pass
-                node_map[n] = nn
-            # Copy links
-            def _socket_index(list_sockets, sock):
-                try:
-                    return list_sockets[:].index(sock)
-                except ValueError:
-                    try:
-                        names = [s.name for s in list_sockets]
-                        return names.index(getattr(sock, 'name', ''))
-                    except Exception:
-                        return -1
-            for lk in src_nt.links:
-                from_n = node_map.get(lk.from_node)
-                to_n = node_map.get(lk.to_node)
-                if not (from_n and to_n):
-                    continue
-                try:
-                    fi = _socket_index(lk.from_node.outputs, lk.from_socket)
-                    ti = _socket_index(lk.to_node.inputs, lk.to_socket)
-                    if fi >= 0 and ti >= 0:
-                        dst_nt.links.new(from_n.outputs[fi], to_n.inputs[ti])
-                except Exception:
-                    pass
-        except Exception as e:
-            print(f"[Delighter] Overwrite material template error: {e}")
-
-    def _set_images_on_material(dst_mat: bpy.types.Material, dlbc, normal_path, dlao, dlbn):
-        try:
-            nt = dst_mat.node_tree
-            nodes = nt.nodes if nt else None
-            def _set_img(node_name, img_path, cs_name):
-                if not nodes:
-                    return
-                node = nodes.get(node_name)
-                if not (node and hasattr(node, "image")):
-                    return
-                node.image = None
-                if not img_path or not os.path.isfile(img_path):
-                    return
-                img = None
-                try:
-                    np = _norm_path(img_path)
-                    img = _find_existing_image_by_path(np)
-                    if img is None:
-                        img = bpy.data.images.load(np, check_existing=True)
-                    try:
-                        if getattr(img, 'packed_file', None):
-                            img.unpack(method='USE_ORIGINAL')
-                    except Exception:
-                        pass
-                except Exception:
-                    img = None
-                if img:
-                    try:
-                        img.reload()
-                    except Exception:
-                        pass
-                    node.image = img
-                    try:
-                        node.image.colorspace_settings.name = cs_name
-                    except Exception:
-                        pass
-            _set_img("DLBC", dlbc, "sRGB")
-            _set_img("DLAO", dlao, "Non-Color")
-            _set_img("DLBN", dlbn, "Non-Color")
-            if normal_path and os.path.isfile(normal_path):
-                node_normals = (
-                    nodes.get("Normals") or
-                    nodes.get("Normal") or
-                    nodes.get("NormalTex")
-                )
-                if not node_normals:
-                    for cand in nodes:
-                        try:
-                            if cand.bl_idname == 'ShaderNodeTexImage':
-                                nm = (cand.name or "").lower()
-                                if ("normal" in nm) and ("bent" not in nm):
-                                    node_normals = cand
-                                    break
-                        except Exception:
-                            pass
-                if node_normals and hasattr(node_normals, "image"):
-                    node_normals.image = None
-                    img = None
-                    try:
-                        np = _norm_path(normal_path)
-                        img = _find_existing_image_by_path(np)
-                        if img is None:
-                            img = bpy.data.images.load(np, check_existing=True)
-                        try:
-                            if getattr(img, 'packed_file', None):
-                                img.unpack(method='USE_ORIGINAL')
-                        except Exception:
-                            pass
-                    except Exception:
-                        img = None
-                    if img:
-                        try:
-                            img.reload()
-                        except Exception:
-                            pass
-                        node_normals.image = img
-                        try:
-                            node_normals.image.colorspace_settings.name = "Non-Color"
-                        except Exception:
-                            pass
-        except Exception as e:
-            print(f"[Delighter] Node setup error: {e}")
-
-    # Decide if UDIM-style multi-material assignment is needed
-    slots = obj.data.materials
-    has_udim_mats = False
-    try:
-        for m in slots:
-            if m and _extract_udim_token(m.name):
-                has_udim_mats = True
-                break
-    except Exception:
-        has_udim_mats = False
-
-    try:
-        if has_udim_mats or (len(udim_map.keys()) > 1):
-            # Per-slot assignment based on material UDIM; overwrite slot materials in place
-            for i in range(len(slots)):
-                m_old = slots[i]
-                target_name = m_old.name if m_old and m_old.name else f"{base_name}_1001"
-                udim = _extract_udim_token(target_name) or '1001'
-                tex = udim_map.get(udim) or udim_map.get('1001') or {
-                    'dlbc': dlbc_single,
-                    'normal': normal_single,
-                    'dlao': dlao_single,
-                    'dlbn': dlbn_single,
-                }
-                if m_old is None:
-                    m_old = bpy.data.materials.new(target_name)
-                    slots[i] = m_old
-                _overwrite_material_with_template(m_old, src_mat)
-                _set_images_on_material(m_old, tex.get('dlbc'), tex.get('normal'), tex.get('dlao'), tex.get('dlbn'))
-            obj.active_material = slots[0] if len(slots) > 0 else None
-        else:
-            # Single material applied to all slots; overwrite each slot's material contents
-            tex = udim_map.get('1001') or {
-                'dlbc': dlbc_single,
-                'normal': normal_single,
-                'dlao': dlao_single,
-                'dlbn': dlbn_single,
-            }
-            if len(slots) == 0:
-                m = bpy.data.materials.new(base_name)
-                slots.append(m)
-            for i in range(len(slots)):
-                m = slots[i]
-                if m is None:
-                    m = bpy.data.materials.new(base_name)
-                    slots[i] = m
-                _overwrite_material_with_template(m, src_mat)
-                _set_images_on_material(m, tex.get('dlbc'), tex.get('normal'), tex.get('dlao'), tex.get('dlbn'))
-            obj.active_material = slots[0]
-    except Exception as e:
-        print(f"[Delighter] Assign error: {e}")
+# (Delighter material import and assignment moved to operators/setup_materials.py)
 
 # ------------------------------------------------------------
 # Registration (no panel here — your main panel draws the UI)
@@ -1104,33 +1007,5 @@ def unregister_designer_bake():
 # ------------------------------------------------------------
 # Extended baked texture finder (fix for Light Removal)
 # ------------------------------------------------------------
-def _find_baked_textures_ex(bake_tex_dir):
-    """
-    Returns (dlbc_path, normal_path, dlao_path, dlbn_path).
-    - Normal path excludes Bent_Normals on purpose.
-    """
-    if not os.path.isdir(bake_tex_dir):
-        return None, None, None, None
-
-    normal_path = None
-    for fn in sorted(os.listdir(bake_tex_dir)):
-        lower = fn.lower()
-        if lower.endswith((".png",".tga",".jpg",".jpeg",".exr",".tif",".tiff",".bmp",".webp")):
-            if "bent" in lower and "normal" in lower:
-                continue
-            if "_normal" in lower or "_normals" in lower:
-                normal_path = os.path.join(bake_tex_dir, fn)
-                break
-
-    dlbc = None; dlao = None; dlbn = None
-    for fn in sorted(os.listdir(bake_tex_dir)):
-        lower = fn.lower()
-        full = os.path.join(bake_tex_dir, fn)
-        if any(k in lower for k in ["_dlbc","basecolor","base_color","albedo"]):
-            dlbc = dlbc or full
-        if "_dlao" in lower or (("ao" in lower) and ("dl" in lower)):
-            dlao = dlao or full
-        if "_dlbn" in lower or ("bent" in lower and "normal" in lower):
-            dlbn = dlbn or full
-    return dlbc, normal_path, dlao, dlbn
+"""Extended baked texture finder removed with material setup decoupling."""
 

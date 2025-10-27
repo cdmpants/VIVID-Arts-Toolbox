@@ -3,106 +3,76 @@ import os
 
 class VIVID_OT_generate_asset(bpy.types.Operator):
     bl_idname = "vivid.generate_asset"
-    bl_label = "Generate Asset"
-    bl_description = "Duplicates the Optimized mesh and prepares it as LOD0 for asset generation."
+    bl_label = "Generate Cinema Model"
+    bl_description = "Creates a 'Cinema' collection and duplicates the _Optimized mesh as _Cinema."
 
     def execute(self, context):
-        self.report({'INFO'}, "Starting Generate Asset process...")
-
+        self.report({'INFO'}, "Starting Generate Cinema Model process...")
         optimized_collection = bpy.data.collections.get("Optimized")
-        asset_collection = bpy.data.collections.get("Asset")
+        cinema_collection = bpy.data.collections.get("Cinema")
 
-        if not asset_collection:
-            asset_collection = bpy.data.collections.new("Asset")
-            bpy.context.scene.collection.children.link(asset_collection)
-            self.report({'INFO'}, "Created new collection: 'Asset'.")
+        if not cinema_collection:
+            cinema_collection = bpy.data.collections.new("Cinema")
+            bpy.context.scene.collection.children.link(cinema_collection)
+            self.report({'INFO'}, "Created new collection: 'Cinema'.")
 
+        # Find _Optimized mesh
         optimized_mesh_obj = None
-        cage_mesh_obj = None
-        high_poly_obj = None
-
-        # Find _Optimized, _Cage, and _HighPoly objects
         if optimized_collection:
             for obj in optimized_collection.objects:
-                if obj.type == 'MESH':
-                    if obj.name.endswith("_Optimized"):
-                        optimized_mesh_obj = obj
-                    elif obj.name.endswith("_Cage"):
-                        cage_mesh_obj = obj
-                    elif obj.name.endswith("_HighPoly"):
-                        high_poly_obj = obj
-                if optimized_mesh_obj and cage_mesh_obj and high_poly_obj:
+                if obj.type == 'MESH' and obj.name.endswith("_Optimized"):
+                    optimized_mesh_obj = obj
                     break
-        
-        # Fallback search if not found in collection (or collection doesn't exist)
-        # This ensures objects are found even if not in the 'Optimized' collection initially
-        if not optimized_mesh_obj or not cage_mesh_obj or not high_poly_obj:
+        if not optimized_mesh_obj:
             for obj in bpy.data.objects:
-                if obj.type == 'MESH':
-                    if obj.name.endswith("_Optimized") and not optimized_mesh_obj:
-                        optimized_mesh_obj = obj
-                    elif obj.name.endswith("_Cage") and not cage_mesh_obj:
-                        cage_mesh_obj = obj
-                    elif obj.name.endswith("_HighPoly") and not high_poly_obj:
-                        high_poly_obj = obj
-                if optimized_mesh_obj and cage_mesh_obj and high_poly_obj:
-                    break # Break once all three are found
+                if obj.type == 'MESH' and obj.name.endswith("_Optimized"):
+                    optimized_mesh_obj = obj
+                    break
 
-        # Error handling if required objects are not found
         if not optimized_mesh_obj:
             self.report({'ERROR'}, "No object ending with '_Optimized' found in scene. Please ensure your optimized mesh is correctly named.")
             return {'CANCELLED'}
-        if not cage_mesh_obj:
-            self.report({'ERROR'}, "No object ending with '_Cage' found in scene. Please ensure your cage mesh is correctly named.")
-            return {'CANCELLED'}
 
-        # (Removed FBX export; Generate Asset should not perform external file exports.)
+        # Compute base and target names
+        base = optimized_mesh_obj.name[:-10] if optimized_mesh_obj.name.endswith('_Optimized') else optimized_mesh_obj.name
+        cinema_name = f"{base}_Cinema"
 
-        # Handle high_poly_texture_path initialization for clarity and warnings
-        high_poly_texture_path = ""
-        if high_poly_obj:
-            # Iterate through materials and their nodes to find the diffuse texture
-            for mat_slot in high_poly_obj.data.materials:
-                if mat_slot.material: # Ensure the material slot actually has a material assigned
-                    for node in mat_slot.material.node_tree.nodes:
-                        if node.type == 'TEX_IMAGE' and node.image:
-                            # Check for common diffuse texture naming conventions
-                            if "_HighPoly_u0_v0_diffuse.png" in node.image.filepath or "_HighPoly_u0_v0_diffuse.exr" in node.image.filepath:
-                                high_poly_texture_path = bpy.path.abspath(node.image.filepath)
-                                self.report({'INFO'}, f"Found HighPoly diffuse texture: {high_poly_texture_path}")
-                                break # Found the texture, exit inner loop
-                        if high_poly_texture_path:
-                            break # Found the texture, exit middle loop
-                if high_poly_texture_path:
-                    break # Found the texture, exit outer loop
-        
-            if not high_poly_texture_path:
-                self.report({'WARNING'}, "No diffuse texture found for '_HighPoly' object. The BaseColor_Transfer_DLBC baker might not work as expected without it.")
-        else:
-            self.report({'WARNING'}, "No '_HighPoly' object found. The BaseColor_Transfer_DLBC baker might not work as expected without it.")
-            high_poly_texture_path = "" # Ensure it's an empty string if not found
+        # Remove any existing Cinema object with the same name for idempotence
+        existing = bpy.data.objects.get(cinema_name)
+        if existing:
+            try:
+                # Unlink from all collections first
+                for coll in list(existing.users_collection):
+                    try:
+                        coll.objects.unlink(existing)
+                    except Exception:
+                        pass
+                bpy.data.objects.remove(existing, do_unlink=True)
+            except Exception:
+                pass
 
-        # Duplicate and rename the Optimized mesh to LOD0
-        self.report({'INFO'}, "Duplicating Optimized mesh to _LOD0 and moving to Asset collection (no FBX export)...")
+        # Create a duplicated object with duplicated mesh data (independent copy)
+        new_obj = optimized_mesh_obj.copy()
+        try:
+            new_obj.data = optimized_mesh_obj.data.copy()
+        except Exception:
+            new_obj.data = optimized_mesh_obj.data
+        new_obj.name = cinema_name
+        try:
+            new_obj.data.name = cinema_name
+        except Exception:
+            pass
 
-        bpy.ops.object.select_all(action='DESELECT')
-        optimized_mesh_obj.select_set(True)
-        context.view_layer.objects.active = optimized_mesh_obj  # Set active for duplication
+        # Link to Cinema collection
+        try:
+            cinema_collection.objects.link(new_obj)
+        except Exception:
+            # Fallback to scene root
+            try:
+                bpy.context.scene.collection.objects.link(new_obj)
+            except Exception:
+                pass
 
-        bpy.ops.object.duplicate_move()  # Duplicate the selected object
-        lod0_obj = context.active_object  # The duplicated object becomes the active object
-
-        new_name = optimized_mesh_obj.name.replace("_Optimized", "_LOD0")
-        lod0_obj.name = new_name  # Rename the duplicated object
-        lod0_obj.data.name = new_name  # Rename the mesh data block
-
-        # Link LOD0 to the Asset collection and unlink from other collections if necessary
-        if optimized_collection and lod0_obj.name in optimized_collection.objects:
-            optimized_collection.objects.unlink(lod0_obj)  # Unlink from 'Optimized' collection
-        if lod0_obj.name not in asset_collection.objects:
-            asset_collection.objects.link(lod0_obj)  # Ensure it's linked to 'Asset' collection
-
-        self.report({'INFO'}, f"Generated LOD0: {lod0_obj.name} in 'Asset' collection.")
-        self.report({'INFO'}, "Generate Asset process completed.")
+        self.report({'INFO'}, f"Generated Cinema mesh: {cinema_name} in 'Cinema' collection.")
         return {'FINISHED'}
 
