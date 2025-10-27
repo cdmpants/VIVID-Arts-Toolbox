@@ -289,21 +289,7 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 _prune_unused_materials(lod)
                 lod_names.append(lod.name)
 
-            # Data Transfer (normals from Cinema source) — apply to imported LODs, but skip LOD0
-            src_obj = src  # use the original Cinema object as the transfer source
-            if src_obj:
-                for name in lod_names:
-                    lod = bpy.data.objects.get(name)
-                    if not lod:
-                        continue
-                    # Skip adding Data Transfer to LOD0
-                    if name.endswith('_LOD0'):
-                        continue
-                    mod = lod.modifiers.new("DataTransfer", 'DATA_TRANSFER')
-                    mod.object = src_obj
-                    mod.use_loop_data = True
-                    mod.data_types_loops = {'CUSTOM_NORMAL'}
-                    mod.loop_mapping = 'POLYINTERP_LNORPROJ'
+            # (moved) Data Transfer setup will occur at the very end using LOD0 as the source
 
             # Optional MeshCollider from imported LOD0
             gen_collider = bool(getattr(sprops, 'generate_collider', True))
@@ -396,6 +382,24 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 bpy.data.materials.remove(temp_mat, do_unlink=True)
             if temp_img.name in bpy.data.images:
                 bpy.data.images.remove(temp_img, do_unlink=True)
+
+            # Data Transfer (normals) — apply at the end: use imported LOD0 as the source, skip LOD0 itself
+            src_lod0 = bpy.data.objects.get(f"{base_label}_LOD0")
+            if src_lod0:
+                for name in lod_names:
+                    if name.endswith('_LOD0'):
+                        continue
+                    lod = bpy.data.objects.get(name)
+                    if not lod:
+                        continue
+                    try:
+                        mod = lod.modifiers.new("DataTransfer", 'DATA_TRANSFER')
+                        mod.object = src_lod0
+                        mod.use_loop_data = True
+                        mod.data_types_loops = {'CUSTOM_NORMAL'}
+                        mod.loop_mapping = 'POLYINTERP_LNORPROJ'
+                    except Exception:
+                        pass
 
         # Process all sources
         errs = []

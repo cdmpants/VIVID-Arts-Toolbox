@@ -54,7 +54,7 @@ def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_
  <filter name="Simplification: Quadric Edge Collapse Decimation (with texture)">
   <Param description="Target number of faces" value="{target_face_count}" type="RichInt" name="TargetFaceNum"/>
   <Param description="Quality threshold" value="0.5" type="RichFloat" name="QualityThr"/>
-  <Param description="Texture Weight" value="500" type="RichFloat" isxmlparam="0" name="Extratcoordw"/>
+  <Param description="Texture Weight" value="5000" type="RichFloat" isxmlparam="0" name="Extratcoordw"/>
   <Param description="Preserve Boundary of the mesh" value="true" type="RichBool" name="PreserveBoundary"/>
   <Param description="Optimal position of simplified vertices" value="true" type="RichBool" name="OptimalPlacement"/>
   <Param description="Preserve Normal" value="true" type="RichBool" name="PreserveNormal"/>

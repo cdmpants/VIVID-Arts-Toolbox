@@ -89,11 +89,6 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
     )
 
     # Per-LOD Displace strengths (override the global when set)
-    __annotations__['displace_cage_strength_lod0'] = FloatProperty(
-        name="LOD0 Displace Strength",
-        description="Displace modifier strength for LOD0 cages.",
-        default=1.0, soft_min=-10.0, soft_max=10.0, precision=3
-    )
     __annotations__['displace_cage_strength_lod1'] = FloatProperty(
         name="LOD1 Displace Strength",
         description="Displace modifier strength for LOD1 cages.",
@@ -123,4 +118,18 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
             ("8192", "8192", "8192 x 8192"),
         ],
         default="4096",
+    )
+
+    # LOD bake scope
+    __annotations__['bake_only_lod0'] = BoolProperty(
+        name="Bake only LOD0",
+        description="When enabled, only export and bake LOD0 (and its UDIMs/cage). Disable to bake all LODs.",
+        default=True
+    )
+
+    # LOD baking scope for textures
+    __annotations__['bake_only_essential_textures'] = BoolProperty(
+        name="Bake only essential textures",
+        description="When enabled, only bake Normal, BentNormal and Displacement; other bakers are disabled.",
+        default=True
     )

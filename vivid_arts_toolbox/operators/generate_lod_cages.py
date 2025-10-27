@@ -11,9 +11,9 @@ class VIVID_OT_generate_lod_cages(bpy.types.Operator):
         try:
             sprops = getattr(context.scene, 'vivid_lod_props', None)
             global_strength = float(getattr(sprops, 'displace_cage_strength', 1.0)) if sprops else 1.0
-            # Read per-LOD overrides if present; fallback to global
-            lod_strengths = {}
-            for idx in (0, 1, 2, 3):
+            # Read per-LOD overrides for LOD1–LOD3 only; LOD0 uses global
+            lod_strengths = {0: global_strength}
+            for idx in (1, 2, 3):
                 attr = f"displace_cage_strength_lod{idx}"
                 try:
                     lod_strengths[idx] = float(getattr(sprops, attr)) if sprops and hasattr(sprops, attr) else global_strength
@@ -47,8 +47,20 @@ class VIVID_OT_generate_lod_cages(bpy.types.Operator):
         # Source LODs: names ending in _LOD0.._LOD3, exclude proxies/colliders
         base_lod_rx = re.compile(r"_LOD[0-3]$")
         candidates = [o for o in lod_coll.objects if o.type == 'MESH' and base_lod_rx.search(o.name) and ('ShadowProxy' not in o.name) and ('Collider' not in o.name)]
+        # If 'Bake only LOD0' is enabled, restrict cages to only LOD0
+        only_lod0 = True
+        try:
+            sprops = getattr(context.scene, 'vivid_lod_props', None)
+            only_lod0 = bool(getattr(sprops, 'bake_only_lod0', True))
+        except Exception:
+            only_lod0 = True
+        if only_lod0:
+            candidates = [o for o in candidates if o.name.endswith('_LOD0')]
         if not candidates:
-            self.report({'WARNING'}, "No base LODs found in 'LOD'.")
+            msg = "No base LODs found in 'LOD'."
+            if only_lod0:
+                msg = "Bake only LOD0 is enabled but no _LOD0 found in 'LOD'."
+            self.report({'WARNING'}, msg)
             return {'CANCELLED'}
 
         created = 0
@@ -57,16 +69,14 @@ class VIVID_OT_generate_lod_cages(bpy.types.Operator):
             # Remove any existing with same name from cage collection
             _delete_obj_in_cage(cage_name)
 
-            # Duplicate
-            bpy.ops.object.select_all(action='DESELECT')
-            src.select_set(True)
-            context.view_layer.objects.active = src
+            # Duplicate robustly without relying on operators
             try:
-                bpy.ops.object.duplicate_move()
+                dup = src.copy()
+                dup.data = src.data.copy()
+                dup.matrix_world = src.matrix_world.copy()
             except Exception as e:
                 self.report({'ERROR'}, f"Duplicate failed for {src.name}: {e}")
                 continue
-            dup = context.active_object
             dup.name = cage_name
             dup.data.name = cage_name
             # Add a Displace modifier using configured strength (per-LOD override)
@@ -84,10 +94,15 @@ class VIVID_OT_generate_lod_cages(bpy.types.Operator):
                     pass
             except Exception:
                 pass
-            # Unlink from all current collections, link only to cage_coll
-            for c in list(dup.users_collection):
-                c.objects.unlink(dup)
-            cage_coll.objects.link(dup)
+            # Link only to cage_coll (new copy has no collections yet)
+            try:
+                cage_coll.objects.link(dup)
+            except Exception:
+                # Fallback: ensure not left orphaned
+                try:
+                    context.scene.collection.objects.link(dup)
+                except Exception:
+                    pass
             created += 1
 
         self.report({'INFO'}, f"Generated {created} LOD cage(s) in 'LOD_Cage'.")

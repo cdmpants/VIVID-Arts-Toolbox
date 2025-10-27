@@ -99,26 +99,32 @@ class VIVID_PT_lod_textures(Panel):
     def draw(self, context):
         layout = self.layout
         col = layout.column(align=True)
-        # Slider for Displace strength used by LOD cage generation
         s = getattr(context.scene, 'vivid_lod_props', None)
+        # Bake only LOD0 toggle at top
+        if s and hasattr(s, 'bake_only_lod0'):
+            col.prop(s, 'bake_only_lod0', text='Bake only LOD0')
+        # Bake only essential textures toggle
+        if s and hasattr(s, 'bake_only_essential_textures'):
+            col.prop(s, 'bake_only_essential_textures', text='Bake only essential textures')
+        # Slider for Displace strength used by LOD cage generation
         if s and hasattr(s, 'displace_cage_strength'):
             col.prop(s, 'displace_cage_strength', text='Displace Modifier Strength')
             # Per-LOD overrides (shown when available)
             has_per_lod = all(hasattr(s, attr) for attr in (
-                'displace_cage_strength_lod0',
                 'displace_cage_strength_lod1',
                 'displace_cage_strength_lod2',
                 'displace_cage_strength_lod3',
             ))
-            if has_per_lod:
+            # Hide overrides when baking only LOD0
+            show_overrides = has_per_lod and (not bool(getattr(s, 'bake_only_lod0', False)))
+            if show_overrides:
                 box = col.box()
                 box.label(text="Per-LOD Displace Overrides")
                 bcol = box.column(align=True)
-                bcol.prop(s, 'displace_cage_strength_lod0', text='LOD0 Displace Strength')
                 bcol.prop(s, 'displace_cage_strength_lod1', text='LOD1 Displace Strength')
                 bcol.prop(s, 'displace_cage_strength_lod2', text='LOD2 Displace Strength')
                 bcol.prop(s, 'displace_cage_strength_lod3', text='LOD3 Displace Strength')
-        # Generate LOD Cages (moved above Max Resolution)
+        # Generate LOD Cages (above Max Resolution)
         if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "generate_lod_cages"):
             col.operator("vivid.generate_lod_cages", text="Generate LOD Cages", icon='MESH_GRID')
         else:

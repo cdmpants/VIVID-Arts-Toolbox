@@ -82,6 +82,18 @@ class VIVID_OT_bake_lod_textures(Operator):
             self.report({'ERROR'}, "No base LODs (_LOD0.._LOD3) found in 'LOD'.")
             return {'CANCELLED'}
 
+        # Optionally restrict baking to only LOD0 when toggled in LOD props
+        sprops = getattr(context.scene, 'vivid_lod_props', None)
+        try:
+            only_lod0 = bool(getattr(sprops, 'bake_only_lod0', True))
+        except Exception:
+            only_lod0 = True
+        if only_lod0:
+            base_lods = [o for o in base_lods if o.name.endswith('_LOD0')]
+            if not base_lods:
+                self.report({'ERROR'}, "Requested to bake only LOD0, but no _LOD0 found in 'LOD'.")
+                return {'CANCELLED'}
+
         # Export each base LOD and its cage (if present) to BakeMesh
         def _export_obj_to_fbx(obj, out_path):
             bpy.ops.object.select_all(action='DESELECT')
@@ -139,17 +151,22 @@ class VIVID_OT_bake_lod_textures(Operator):
         # Bake resolution: prefer LOD-specific Max Resolution, fallback to Designer bake resolution
         settings = getattr(context.scene, "vivid_designer_bake", None)
         sprops = getattr(context.scene, 'vivid_lod_props', None)
+        # Toggle: bake only essential textures (Normal, BentNormal, Displacement)
+        try:
+            only_essential = bool(getattr(sprops, 'bake_only_essential_textures', True))
+        except Exception:
+            only_essential = True
         try:
             max_res_px = int(getattr(sprops, 'lod_max_resolution', '') or 0) or int(settings.bake_resolution) if settings and getattr(settings, 'bake_resolution', None) else 2048
         except Exception:
             max_res_px = 2048
         use_cpu = (settings.engine == "CPU") if settings else False
 
-    # Run bakes per LOD
+        # Run bakes per LOD
         # Helper: patch multiple TextureTransfer bakers in-place based on available sources
-        def _patch_transfer_bakers(json_path: str, udim: int, get_map_for_kind):
+        def _patch_transfer_bakers(json_path: str, udim: int, get_map_for_kind, hard_required: set):
             """get_map_for_kind(kind:str)->dict(udim->path). Mutates JSON to set source_texture_path and is_selected.
-            Enforces hard requirements for 'Normal' and 'BaseColor' (must exist for this UDIM), others are optional.
+            Enforces hard requirements for identifiers in hard_required; others are optional.
             Returns (ok: bool, warnings: list[str]).
             """
             warnings = []
@@ -170,7 +187,7 @@ class VIVID_OT_bake_lod_textures(Operator):
                     # Determine source
                     m = get_map_for_kind(ident)
                     src = m.get(udim) if isinstance(m, dict) else None
-                    hard = ident in ('Normal', 'BaseColor')
+                    hard = ident in hard_required
                     if src:
                         params['source_texture_path'] = src
                         params['is_selected'] = True
@@ -191,6 +208,31 @@ class VIVID_OT_bake_lod_textures(Operator):
             except Exception:
                 return False, warnings
             return True, warnings
+
+        # Helper: when only essential textures are requested, disable other bakers in the JSON
+        def _filter_nonessential_bakers(json_path: str, allowed_ids: set):
+            try:
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except Exception:
+                return
+            changed = False
+            try:
+                for baker in data.get('bakers', []) or []:
+                    if not isinstance(baker, dict):
+                        continue
+                    ident = str(baker.get('identifier', '') or '')
+                    if ident not in allowed_ids:
+                        params = baker.get('parameters') or {}
+                        if isinstance(params, dict):
+                            if params.get('is_selected', True):
+                                params['is_selected'] = False
+                                changed = True
+                if changed:
+                    with open(json_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=2)
+            except Exception:
+                return
 
         # Helper: ensure AO baker receives the Cinema Normal map via normal_map_path
         def _patch_ao_normal(json_path: str, ao_normal_path: str):
@@ -269,15 +311,17 @@ class VIVID_OT_bake_lod_textures(Operator):
             if not udim_list:
                 udim_list = [1001]
 
-            # Require a Normal and BaseColor map for every UDIM we intend to bake; BentNormal is optional (warn only)
+            # Require a Normal map for every UDIM we intend to bake.
+            # BaseColor is also required unless only_essential is enabled.
             missing_normals = [ud for ud in udim_list if ud not in normals_by_udim]
             if missing_normals:
                 self.report({'ERROR'}, f"Missing Cinema Normal textures for UDIMs: {missing_normals} in {textures_root}")
                 return {'CANCELLED'}
-            missing_base = [ud for ud in udim_list if ud not in basecolor_by_udim]
-            if missing_base:
-                self.report({'ERROR'}, f"Missing Cinema BaseColor textures for UDIMs: {missing_base} in {textures_root}")
-                return {'CANCELLED'}
+            if not only_essential:
+                missing_base = [ud for ud in udim_list if ud not in basecolor_by_udim]
+                if missing_base:
+                    self.report({'ERROR'}, f"Missing Cinema BaseColor textures for UDIMs: {missing_base} in {textures_root}")
+                    return {'CANCELLED'}
 
             # Bake per UDIM with matching source texture and single uv_tile
             # Determine LOD index to derive per-LOD resolution
@@ -314,13 +358,14 @@ class VIVID_OT_bake_lod_textures(Operator):
                     # Lazily resolve any additional TextureTransfer identifiers
                     cache[kind] = _cinema_maps_by_udim(textures_root, base_name, kind)
                     return cache[kind]
-                ok, warns = _patch_transfer_bakers(gen_json, ud, _get_map_for_kind)
+                hard_required = {'Normal'} if only_essential else {'Normal', 'BaseColor'}
+                ok, warns = _patch_transfer_bakers(gen_json, ud, _get_map_for_kind, hard_required)
                 if not ok:
                     # Determine which hard requirement is missing for better messaging
                     msg = []
                     if ud not in normals_by_udim:
                         msg.append('Normal')
-                    if ud not in basecolor_by_udim:
+                    if (not only_essential) and (ud not in basecolor_by_udim):
                         msg.append('BaseColor')
                     if not msg:
                         msg.append('required texture')
@@ -330,6 +375,11 @@ class VIVID_OT_bake_lod_textures(Operator):
                     self.report({'WARNING'}, w)
                 # Ensure AO baker uses the Cinema Normal map as normal_map_path
                 _patch_ao_normal(gen_json, normals_by_udim.get(ud))
+                # If only essential textures are requested, disable others.
+                # Displacement is only essential for LOD0.
+                if only_essential:
+                    allowed = {'Normal', 'BentNormal', 'Displacement'} if lod_idx == 0 else {'Normal', 'BentNormal'}
+                    _filter_nonessential_bakers(gen_json, allowed)
                 rc = _run_baker(exe_path, gen_json, log_path, cwd=bake_mesh, use_cpu=use_cpu)
                 total_rc += (rc or 0)
 
