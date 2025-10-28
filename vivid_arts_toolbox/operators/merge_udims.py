@@ -27,11 +27,13 @@ class VIVID_OT_merge_udims(Operator):
             return {'CANCELLED'}
 
         # For each LOD subfolder under Textures/LOD, merge tiles
+        print(f"[UDIM-MERGE] Root: {lod_root}")
         merged_any = False
         for sub in sorted(os.listdir(lod_root)):
             subdir = os.path.join(lod_root, sub)
             if not os.path.isdir(subdir):
                 continue
+            print(f"[UDIM-MERGE] Processing LOD folder: {subdir}")
             try:
                 _merge_udims_for_lod(subdir)
                 merged_any = True
@@ -68,9 +70,13 @@ def _merge_udims_for_lod(lod_out_dir: str):
         groups[ident].append((ud, str(f), m.group('ext').lower(), m.group('prefix')))
         udims_set.add(ud)
     if not groups:
+        print(f"[UDIM-MERGE] No matching UDIM tiles in: {lod_out_dir}")
         return
     import math
     grid_n = int(math.ceil(math.sqrt(max(1, len(udims_set)))))
+    print(f"[UDIM-MERGE] LOD dir: {lod_out_dir}")
+    print(f"[UDIM-MERGE] UDIMs: {sorted(udims_set)}  grid_n: {grid_n}")
+    print(f"[UDIM-MERGE] Map identifiers: {list(groups.keys())}")
     for ident, entries in groups.items():
         entries.sort(key=lambda t: t[0])
         if not entries:
@@ -89,6 +95,9 @@ def _merge_udims_for_lod(lod_out_dir: str):
         # Load first image to get tile size
         first_img = bpy.data.images.load(entries[0][1])
         tile_w, tile_h = first_img.size
+        print(f"[UDIM-MERGE] Map: {ident}  tiles: {len(entries)}  ext: {ext}")
+        print(f"[UDIM-MERGE] Prefix: {prefix}")
+        print(f"[UDIM-MERGE] Tile size: {tile_w}x{tile_h}  Output size: {grid_n*tile_w}x{grid_n*tile_h}")
         # Naming derived from UDIM textures: <BaseName>_LOD#_<TextureType>
         out_name = f"{prefix}_{ident}.{ext}"
         out_path = str(p / out_name)
@@ -106,65 +115,89 @@ def _merge_udims_for_lod(lod_out_dir: str):
 
 
 def _compose_images_grid(udim_path_pairs, grid_n, tile_w, tile_h, out_path, ext):
-    """Composite images into a grid using Blender's Compositor.
+    """Build the atlas via a temporary orthographic render (GPU), not the compositor.
     udim_path_pairs: list of (udim, path) sorted by UDIM ascending.
     """
+    import math
+    from mathutils import Vector
     # Create temp scene
-    scene = bpy.data.scenes.new("VIVID_MERGE_UDIM")
-    scene.use_nodes = True
-    nt = scene.node_tree
-    for n in list(nt.nodes):
-        nt.nodes.remove(n)
-    comp = nt.nodes.new('CompositorNodeComposite')
-    comp.location = (600, 0)
-    last = None
-    # Set render size
+    scene = bpy.data.scenes.new("VIVID_ATLAS_UDIM")
     scene.render.resolution_x = grid_n * int(tile_w)
     scene.render.resolution_y = grid_n * int(tile_h)
     scene.render.resolution_percentage = 100
-    # Determine file format
-    fmt_map = {
-        'png': 'PNG', 'jpg': 'JPEG', 'jpeg': 'JPEG', 'tif': 'TIFF', 'tiff': 'TIFF', 'exr': 'OPEN_EXR'
-    }
-    scene.render.image_settings.file_format = fmt_map.get(ext.lower(), 'PNG')
-    # Ensure neutral view transform
+    scene.render.film_transparent = True
     try:
         scene.view_settings.view_transform = 'Standard'
     except Exception:
         pass
-    # Build nodes per tile
+    fmt_map = {'png': 'PNG', 'jpg': 'JPEG', 'jpeg': 'JPEG', 'tif': 'TIFF', 'tiff': 'TIFF', 'exr': 'OPEN_EXR'}
+    scene.render.image_settings.file_format = fmt_map.get(ext.lower(), 'PNG')
+
+    # Camera: orthographic framing [0..grid_n] x [0..grid_n]
+    cam_data = bpy.data.cameras.new("VIVID_ATLAS_CAM")
+    cam_data.type = 'ORTHO'
+    cam_data.ortho_scale = float(grid_n)
+    cam = bpy.data.objects.new("VIVID_ATLAS_CAM", cam_data)
+    cam.location = (grid_n/2.0, grid_n/2.0, 10.0)
+    cam.rotation_euler = (0.0, 0.0, 0.0)
+    scene.collection.objects.link(cam)
+    scene.camera = cam
+
+    mats_to_remove = []
+    imgs_to_remove = []
+    objs_to_remove = []
+
+    def make_plane_with_image(img_path: str, x: float, y: float):
+        # Load image
+        try:
+            img = bpy.data.images.load(img_path)
+            imgs_to_remove.append(img)
+        except Exception:
+            return None
+        # Material with Emission -> Output
+        mat = bpy.data.materials.new(name="VIVID_ATLAS_TILE")
+        mat.use_nodes = True
+        nt = mat.node_tree
+        for n in list(nt.nodes):
+            nt.nodes.remove(n)
+        n_img = nt.nodes.new('ShaderNodeTexImage')
+        n_img.image = img
+        n_em  = nt.nodes.new('ShaderNodeEmission')
+        n_out = nt.nodes.new('ShaderNodeOutputMaterial')
+        nt.links.new(n_img.outputs['Color'], n_em.inputs['Color'])
+        nt.links.new(n_em.outputs['Emission'], n_out.inputs['Surface'])
+        mats_to_remove.append(mat)
+
+        # Create a unit plane centered at origin with UVs
+        me = bpy.data.meshes.new("VIVID_ATLAS_TILE")
+        verts = [(-0.5, -0.5, 0.0), (0.5, -0.5, 0.0), (0.5, 0.5, 0.0), (-0.5, 0.5, 0.0)]
+        faces = [(0,1,2,3)]
+        me.from_pydata(verts, [], faces)
+        me.update()
+        # UVs
+        uv = me.uv_layers.new(name="UVMap")
+        loops = uv.data
+        loops[0].uv = (0.0, 0.0)
+        loops[1].uv = (1.0, 0.0)
+        loops[2].uv = (1.0, 1.0)
+        loops[3].uv = (0.0, 1.0)
+        ob = bpy.data.objects.new("VIVID_ATLAS_TILE", me)
+        ob.location = (x, y, 0.0)
+        # Scale plane to 1x1 cell
+        ob.scale = (1.0, 1.0, 1.0)
+        scene.collection.objects.link(ob)
+        ob.data.materials.append(mat)
+        objs_to_remove.append(ob)
+        return ob
+
+    # Create a plane per tile in cell center at (col+0.5, row+0.5)
     for idx, (ud, path) in enumerate(udim_path_pairs):
         row = idx // grid_n
         col = idx % grid_n
-        img = nt.nodes.new('CompositorNodeImage')
-        try:
-            img.image = bpy.data.images.load(path)
-        except Exception:
-            continue
-        img.location = (-800, -200 * idx)
-        sc = nt.nodes.new('CompositorNodeScale')
-        sc.space = 'RELATIVE'
-        sc.inputs['X'].default_value = 1.0 / grid_n
-        sc.inputs['Y'].default_value = 1.0 / grid_n
-        sc.location = (-400, -200 * idx)
-        tr = nt.nodes.new('CompositorNodeTranslate')
-        tr.location = (0, -200 * idx)
-        tr.inputs['X'].default_value = col * tile_w
-        tr.inputs['Y'].default_value = row * tile_h
-        nt.links.new(img.outputs['Image'], sc.inputs['Image'])
-        nt.links.new(sc.outputs['Image'], tr.inputs['Image'])
-        if last is None:
-            last = tr
-        else:
-            ao = nt.nodes.new('CompositorNodeAlphaOver')
-            ao.location = (300, -200 * idx)
-            nt.links.new(last.outputs['Image'], ao.inputs[1])
-            nt.links.new(tr.outputs['Image'], ao.inputs[2])
-            last = ao
-    if last is None:
-        bpy.data.scenes.remove(scene)
-        return
-    nt.links.new(last.outputs['Image'], comp.inputs['Image'])
+        cx = col + 0.5
+        cy = row + 0.5
+        make_plane_with_image(path, cx, cy)
+
     # Render
     orig_scene = bpy.context.scene
     try:
@@ -175,20 +208,38 @@ def _compose_images_grid(udim_path_pairs, grid_n, tile_w, tile_h, out_path, ext)
             pass
         bpy.ops.render.render(write_still=True)
     finally:
+        # Restore previous scene
         try:
             bpy.context.window.scene = orig_scene
         except Exception:
             pass
+        # Cleanup temporary objects/materials/images and the scene
         try:
-            for n in list(scene.node_tree.nodes):
-                if n.bl_idname == 'CompositorNodeImage' and n.image:
-                    try:
-                        bpy.data.images.remove(n.image)
-                    except Exception:
-                        pass
+            for ob in objs_to_remove:
+                try:
+                    bpy.data.meshes.remove(ob.data)
+                except Exception:
+                    pass
+                try:
+                    bpy.data.objects.remove(ob)
+                except Exception:
+                    pass
+            for mat in mats_to_remove:
+                try:
+                    bpy.data.materials.remove(mat)
+                except Exception:
+                    pass
+            for im in imgs_to_remove:
+                try:
+                    bpy.data.images.remove(im)
+                except Exception:
+                    pass
         except Exception:
             pass
-        bpy.data.scenes.remove(scene)
+        try:
+            bpy.data.scenes.remove(scene)
+        except Exception:
+            pass
 
 
 def register():
