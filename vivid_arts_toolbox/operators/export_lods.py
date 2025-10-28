@@ -61,6 +61,20 @@ class VIVID_OT_export_lods(bpy.types.Operator):
             obj.select_set(True)
             context.view_layer.objects.active = obj
             out_path = os.path.join(mesh_dir, f"{obj.name}.fbx")
+            # Optional UV remap for merged UDIMs (non-destructive): apply only for LOD meshes
+            sprops = getattr(context.scene, 'vivid_lod_props', None)
+            merge_udims = bool(getattr(sprops, 'merge_udims', False)) if sprops else False
+            did_remap = False
+            saved_uv = None
+            if merge_udims and any(obj.name.endswith(f"_LOD{i}") for i in (0,1,2,3)):
+                try:
+                    # Determine UDIM tiles present on this object by scanning active UV layer
+                    udims = _collect_udims(obj)
+                    if udims:
+                        _apply_uv_grid_remap(obj, udims)
+                        did_remap = True
+                except Exception:
+                    did_remap = False
             try:
                 bpy.ops.export_scene.fbx(
                     filepath=out_path,
@@ -76,11 +90,84 @@ class VIVID_OT_export_lods(bpy.types.Operator):
                 exported += 1
             except Exception as e:
                 self.report({'ERROR'}, f"Failed exporting {obj.name}: {e}")
+            finally:
+                # Restore original UVs if we remapped
+                if did_remap:
+                    try:
+                        _restore_uv_grid_remap(obj)
+                    except Exception:
+                        pass
 
         if exported == 0:
             return {'CANCELLED'}
         self.report({'INFO'}, f"Exported {exported} LOD FBXs to: {mesh_dir}")
         return {'FINISHED'}
+
+
+def _collect_udims(obj: bpy.types.Object) -> list[int]:
+    import math
+    me = getattr(obj, 'data', None)
+    if not me or not getattr(me, 'uv_layers', None):
+        return []
+    uv_layer = me.uv_layers.active
+    if not uv_layer:
+        return []
+    udims = set()
+    for loop in uv_layer.data:
+        u, v = float(loop.uv.x), float(loop.uv.y)
+        ud = int(math.floor(u)) + int(math.floor(v)) * 10 + 1001
+        udims.add(ud)
+    return sorted(udims)
+
+
+def _apply_uv_grid_remap(obj: bpy.types.Object, udims: list[int]):
+    """Scale and translate UVs from UDIM tiles into a square grid in 0..1 space.
+    Deterministic order: sorted UDIM ascending, row-major.
+    Stores original UVs on the mesh custom data layer for restoration.
+    """
+    import math
+    me = obj.data
+    if not me.uv_layers:
+        return
+    uv_layer = me.uv_layers.active
+    # Save original UVs into a module-level cache keyed by mesh pointer
+    backup = [(uv.uv.x, uv.uv.y) for uv in uv_layer.data]
+    _UV_BACKUPS[me.as_pointer()] = backup
+    # Build mapping
+    udims_sorted = sorted(set(int(u) for u in udims))
+    n = max(1, int(math.ceil(math.sqrt(len(udims_sorted)))))
+    # Map UDIM -> (row, col)
+    index_map = {ud: i for i, ud in enumerate(udims_sorted)}
+    # Helper to compute tile index from UV
+    def tile_of(u, v):
+        return int((math.floor(u))) + int((math.floor(v))) * 10 + 1001
+    # Remap all loops
+    for loop in uv_layer.data:
+        u, v = float(loop.uv.x), float(loop.uv.y)
+        ud = tile_of(u, v)
+        idx = index_map.get(ud, 0)
+        row, col = divmod(idx, n)
+        # Local UV inside tile
+        u_local = u - math.floor(u)
+        v_local = v - math.floor(v)
+        loop.uv.x = (col + u_local) / n
+        loop.uv.y = (row + v_local) / n
+
+
+def _restore_uv_grid_remap(obj: bpy.types.Object):
+    me = obj.data
+    if not me.uv_layers:
+        return
+    uv_layer = me.uv_layers.active
+    backup = _UV_BACKUPS.pop(me.as_pointer(), None)
+    if not backup:
+        return
+    for (loop, (ux, uy)) in zip(uv_layer.data, backup):
+        loop.uv.x = ux
+        loop.uv.y = uy
+
+# Module-level cache for UV backups during export
+_UV_BACKUPS = {}
 
 
 def register():

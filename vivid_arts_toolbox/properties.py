@@ -133,3 +133,10 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
         description="When enabled, only bake Normal, BentNormal and Displacement; other bakers are disabled.",
         default=True
     )
+
+    # Merge UDIMs after baking into a single square texture per map
+    __annotations__['merge_udims'] = BoolProperty(
+        name="Merge UDIMs",
+        description="After baking, composite UDIM tiles into a single square texture per map and remove the original tiles.",
+        default=True
+    )

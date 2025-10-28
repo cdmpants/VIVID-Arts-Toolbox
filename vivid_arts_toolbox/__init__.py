@@ -30,6 +30,7 @@ from .operators.export_lods import VIVID_OT_export_lods
 from .operators.generate_lod_cages import VIVID_OT_generate_lod_cages
 from .operators.bake_lod_textures import VIVID_OT_bake_lod_textures
 from .operators.render import VIVID_OT_output_renders
+from .operators.merge_udims import VIVID_OT_merge_udims
 
 # Modules with their own register() functions
 from .operators import shadowproxy_correction
@@ -56,6 +57,7 @@ _classes = (
     VIVID_OT_export_lods,
     VIVID_OT_generate_lod_cages,
     VIVID_OT_bake_lod_textures,
+    VIVID_OT_merge_udims,
     VIVID_OT_output_renders,
 )
 

@@ -103,9 +103,16 @@ class VIVID_PT_lod_textures(Panel):
         # Bake only LOD0 toggle at top
         if s and hasattr(s, 'bake_only_lod0'):
             col.prop(s, 'bake_only_lod0', text='Bake only LOD0')
+        # Merge UDIMs toggle (above essential textures)
+        if s and hasattr(s, 'merge_udims'):
+            col.prop(s, 'merge_udims', text='Merge UDIMs')
         # Bake only essential textures toggle
         if s and hasattr(s, 'bake_only_essential_textures'):
-            col.prop(s, 'bake_only_essential_textures', text='Bake only essential textures')
+            row = col.row(align=True)
+            # If Merge UDIMs is on, grey out and effectively lock OFF
+            if hasattr(s, 'merge_udims') and bool(getattr(s, 'merge_udims', False)):
+                row.enabled = False
+            row.prop(s, 'bake_only_essential_textures', text='Bake only essential textures')
         # Slider for Displace strength used by LOD cage generation
         if s and hasattr(s, 'displace_cage_strength'):
             col.prop(s, 'displace_cage_strength', text='Displace Modifier Strength')

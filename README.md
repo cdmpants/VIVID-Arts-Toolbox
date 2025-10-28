@@ -38,7 +38,8 @@ You can find preferences under Edit → Preferences → Add-ons → VIVID Arts T
 - Generate LODs: compute and import LOD0–3, collider and shadow proxies (optional).
 - LOD Textures:
 	- Bake only LOD0 (default ON): restricts cage generation and baking to LOD0.
-	- Bake only essential textures (default ON): only bake Normal, BentNormal (all LODs) and Displacement (LOD0 only).
+	- Merge UDIMs (default ON): after per‑UDIM bakes, tiles are composited into a single square texture per map and the originals are removed. While enabled, “essential only” is disabled.
+	- Bake only essential textures (default ON): only bake Normal, BentNormal (all LODs) and Displacement (LOD0 only). Disabled when “Merge UDIMs” is ON.
 	- Displace Modifier Strength (baseline) and per‑LOD overrides for LOD1–LOD3.
 	- Generate LOD Cages (idempotent, respects “Bake only LOD0”).
 	- Max Resolution (LOD0; lower LODs bake at 1/2, 1/4, 1/8).
@@ -96,6 +97,12 @@ You can find preferences under Edit → Preferences → Add-ons → VIVID Arts T
 		- Disable other bakers.
 - Max Resolution sets LOD0 resolution; lower LODs bake at 1/2, 1/4, 1/8.
 - Outputs: `Release/Textures/LOD`. The add‑on wipes only this subfolder before a bake.
+
+### UDIM merge and export UV remap
+
+- When “Merge UDIMs” is ON, the add‑on merges all UDIM tiles for each baked map into a single square texture per LOD (stored under `Release/Textures/LOD/<LOD>/`), named `<BaseName>_LOD#_<TextureType>.*` (e.g., `Rock_Cliff_LOD0_Normal.tif`).
+- On export (Export LODs), UVs for LOD meshes are remapped non‑destructively into a square N×N grid matching the merge order (UDIM ascending, row‑major). The original UVs are restored immediately after export.
+- Shadow proxies and colliders are exported without UV remapping.
 
 ## Troubleshooting
 

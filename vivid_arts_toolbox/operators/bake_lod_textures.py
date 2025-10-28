@@ -156,6 +156,13 @@ class VIVID_OT_bake_lod_textures(Operator):
             only_essential = bool(getattr(sprops, 'bake_only_essential_textures', True))
         except Exception:
             only_essential = True
+        # Toggle: merge UDIMs; when enabled, force essential-only OFF (we want full sets for merging)
+        try:
+            merge_udims = bool(getattr(sprops, 'merge_udims', True))
+        except Exception:
+            merge_udims = True
+        if merge_udims:
+            only_essential = False
         try:
             max_res_px = int(getattr(sprops, 'lod_max_resolution', '') or 0) or int(settings.bake_resolution) if settings and getattr(settings, 'bake_resolution', None) else 2048
         except Exception:
@@ -332,10 +339,17 @@ class VIVID_OT_bake_lod_textures(Operator):
                 lod_idx = 0
             lod_res_px = max(1, int(max_res_px // (2 ** lod_idx)))
 
+            # LOD-specific output subfolder to avoid filename collisions and ease merging
+            lod_out_dir = os.path.join(textures_dir, lod_obj.name)
+            try:
+                os.makedirs(lod_out_dir, exist_ok=True)
+            except Exception:
+                pass
+
             for ud in udim_list:
                 gen_json = f"{gen_base}_{ud}.json"
                 log_path = f"{log_base}_{ud}.log"
-                _load_and_patch_json(preset_path, files, textures_dir, gen_json, lod_res_px)
+                _load_and_patch_json(preset_path, files, lod_out_dir, gen_json, lod_res_px)
                 # Apply single-tile UDIM for this run
                 try:
                     # Convert UDIM back to (u, v)
@@ -383,8 +397,16 @@ class VIVID_OT_bake_lod_textures(Operator):
                 rc = _run_baker(exe_path, gen_json, log_path, cwd=bake_mesh, use_cpu=use_cpu)
                 total_rc += (rc or 0)
 
+        # After all LOD UDIM runs, optionally merge tiles into single textures via operator
+        if merge_udims:
+            try:
+                bpy.ops.vivid.merge_udims('EXEC_DEFAULT')
+            except Exception as e:
+                self.report({'WARNING'}, f"UDIM merge failed: {e}")
+
         self.report({'INFO'}, f"LOD bakes finished. Output: {textures_dir}")
         return {'FINISHED'}
+
 
 
 def register():

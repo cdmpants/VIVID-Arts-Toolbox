@@ -59,6 +59,34 @@ def _clean_dir(path: str):
         pass
 
 # ------------------------------------------------------------
+# UDIM helpers
+# ------------------------------------------------------------
+def _udim_tiles_from_object(obj) -> list:
+    """Return a sorted list of (u, v) integer UDIM tiles present on the object's active UV layer.
+    If no UVs or only 0..1, returns [(0,0)] or empty accordingly.
+    """
+    try:
+        me = getattr(obj, 'data', None)
+        if not me or not getattr(me, 'uv_layers', None):
+            return []
+        uv_layer = me.uv_layers.active
+        if not uv_layer:
+            return []
+        tiles = set()
+        import math as _math
+        for loop in uv_layer.data:
+            u, v = float(loop.uv.x), float(loop.uv.y)
+            tu, tv = int(_math.floor(u)), int(_math.floor(v))
+            if tu < 0 or tv < 0:
+                # Ignore negative tiles
+                continue
+            tiles.add((tu, tv))
+        tiles_sorted = sorted(tiles, key=lambda t: (t[1], t[0]))
+        return tiles_sorted
+    except Exception:
+        return []
+
+# ------------------------------------------------------------
 # File discovery
 # ------------------------------------------------------------
 def _glob_one(patterns, directory):
