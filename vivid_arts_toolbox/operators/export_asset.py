@@ -44,8 +44,8 @@ class VIVID_OT_export_asset(bpy.types.Operator):
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
 
-        # Tidy structure: export cinema meshes into Release/Mesh
-        mesh_dir = os.path.join(release_dir, "Mesh")
+        # Tidy structure: export cinema meshes into Release/Cinema/Mesh
+        mesh_dir = os.path.join(release_dir, "Cinema", "Mesh")
         os.makedirs(mesh_dir, exist_ok=True)
 
         # Gather base Cinema and variant objects

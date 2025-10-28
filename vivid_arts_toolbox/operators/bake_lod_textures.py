@@ -30,23 +30,25 @@ class VIVID_OT_bake_lod_textures(Operator):
             release_dir = _release_mirror_dir(context)
         except Exception:
             release_dir = os.path.join(os.path.dirname(os.path.dirname(root)), 'Release', os.path.basename(os.path.normpath(root)))
-        # Organize under Release/Textures and Release/Mesh
-        textures_root = os.path.join(release_dir, 'Textures')
-        textures_dir = os.path.join(textures_root, 'LOD')  # LOD outputs go under Textures/LOD
-        mesh_dir = os.path.join(release_dir, 'Mesh')
-        os.makedirs(textures_root, exist_ok=True)
-        os.makedirs(textures_dir, exist_ok=True)
-        # Wipe LOD subfolder only (leave other textures intact)
+        # Organize under new structure:
+        # - Cinema FBX under Release/Cinema/Mesh
+        # - Game textures under Release/Game/Textures/LOD#
+        game_textures_root = os.path.join(release_dir, 'Game', 'Textures')
+        game_mesh_dir = os.path.join(release_dir, 'Game', 'Mesh')
+        cinema_mesh_dir = os.path.join(release_dir, 'Cinema', 'Mesh')
+        os.makedirs(game_textures_root, exist_ok=True)
+        os.makedirs(game_mesh_dir, exist_ok=True)
+        os.makedirs(cinema_mesh_dir, exist_ok=True)
+        # Wipe only the Game Textures folder (we recreate LOD subfolders below)
         try:
-            _clean_dir(textures_dir)
+            _clean_dir(game_textures_root)
         except Exception:
             pass
-        os.makedirs(mesh_dir, exist_ok=True)
 
-        # Locate Cinema FBX in Release/Mesh (fallback to Release root for backward compatibility)
+        # Locate Cinema FBX in Release/Cinema/Mesh (fallbacks retained for backward compatibility)
         cinema_fbx = None
         try:
-            for p in Path(mesh_dir).glob("*_Cinema.fbx"):
+            for p in Path(cinema_mesh_dir).glob("*_Cinema.fbx"):
                 cinema_fbx = str(p)
                 break
         except Exception:
@@ -60,7 +62,7 @@ class VIVID_OT_bake_lod_textures(Operator):
             except Exception:
                 cinema_fbx = None
         if not cinema_fbx:
-            self.report({'ERROR'}, f"No *_Cinema.fbx found in Release/Mesh: {mesh_dir}")
+            self.report({'ERROR'}, f"No *_Cinema.fbx found in Release/Cinema/Mesh: {cinema_mesh_dir}")
             return {'CANCELLED'}
 
         # Find LOD and LOD_Cage collections
@@ -261,9 +263,9 @@ class VIVID_OT_bake_lod_textures(Operator):
             except Exception:
                 return
 
-        # Helper: discover Cinema texture(s) in Release/Textures by UDIM for a given map kind ('Normal' or 'BentNormal')
+        # Helper: discover Cinema texture(s) in Release/Cinema/Textures by UDIM for a given map kind ('Normal' or 'BentNormal')
         def _cinema_maps_by_udim(textures_root_dir: str, base_name: str, map_kind: str):
-            """Return {udim:int -> path} mapping for files like: Base_UDIM_MapKind.ext in Release/Textures.
+            """Return {udim:int -> path} mapping for files like: Base_UDIM_MapKind.ext in Release/Cinema/Textures.
             Example: KAT_Cliff_Short_01_1001_Normal.tif
             """
             mapping = {}
@@ -306,9 +308,11 @@ class VIVID_OT_bake_lod_textures(Operator):
             except Exception:
                 tiles = []
             base_name = lod_obj.name.split('_LOD')[0]
-            normals_by_udim    = _cinema_maps_by_udim(textures_root, base_name, 'Normal')
-            basecolor_by_udim  = _cinema_maps_by_udim(textures_root, base_name, 'BaseColor')
-            bent_by_udim       = _cinema_maps_by_udim(textures_root, base_name, 'BentNormal')
+            # Cinema texture sources live under Release/Cinema/Textures
+            cinema_textures_root = os.path.join(release_dir, 'Cinema', 'Textures')
+            normals_by_udim    = _cinema_maps_by_udim(cinema_textures_root, base_name, 'Normal')
+            basecolor_by_udim  = _cinema_maps_by_udim(cinema_textures_root, base_name, 'BaseColor')
+            bent_by_udim       = _cinema_maps_by_udim(cinema_textures_root, base_name, 'BentNormal')
 
             # Convert tiles to UDIM numbers
             udim_list = []
@@ -322,12 +326,12 @@ class VIVID_OT_bake_lod_textures(Operator):
             # BaseColor is also required unless only_essential is enabled.
             missing_normals = [ud for ud in udim_list if ud not in normals_by_udim]
             if missing_normals:
-                self.report({'ERROR'}, f"Missing Cinema Normal textures for UDIMs: {missing_normals} in {textures_root}")
+                self.report({'ERROR'}, f"Missing Cinema Normal textures for UDIMs: {missing_normals} in {cinema_textures_root}")
                 return {'CANCELLED'}
             if not only_essential:
                 missing_base = [ud for ud in udim_list if ud not in basecolor_by_udim]
                 if missing_base:
-                    self.report({'ERROR'}, f"Missing Cinema BaseColor textures for UDIMs: {missing_base} in {textures_root}")
+                    self.report({'ERROR'}, f"Missing Cinema BaseColor textures for UDIMs: {missing_base} in {cinema_textures_root}")
                     return {'CANCELLED'}
 
             # Bake per UDIM with matching source texture and single uv_tile
@@ -339,8 +343,8 @@ class VIVID_OT_bake_lod_textures(Operator):
                 lod_idx = 0
             lod_res_px = max(1, int(max_res_px // (2 ** lod_idx)))
 
-            # LOD-specific output subfolder to avoid filename collisions and ease merging
-            lod_out_dir = os.path.join(textures_dir, lod_obj.name)
+            # LOD-specific output subfolder (Game): Release/Game/Textures/LOD#
+            lod_out_dir = os.path.join(game_textures_root, f"LOD{lod_idx}")
             try:
                 os.makedirs(lod_out_dir, exist_ok=True)
             except Exception:
@@ -370,7 +374,7 @@ class VIVID_OT_bake_lod_textures(Operator):
                     if kind in cache:
                         return cache[kind]
                     # Lazily resolve any additional TextureTransfer identifiers
-                    cache[kind] = _cinema_maps_by_udim(textures_root, base_name, kind)
+                    cache[kind] = _cinema_maps_by_udim(cinema_textures_root, base_name, kind)
                     return cache[kind]
                 hard_required = {'Normal'} if only_essential else {'Normal', 'BaseColor'}
                 ok, warns = _patch_transfer_bakers(gen_json, ud, _get_map_for_kind, hard_required)
@@ -404,7 +408,7 @@ class VIVID_OT_bake_lod_textures(Operator):
             except Exception as e:
                 self.report({'WARNING'}, f"UDIM merge failed: {e}")
 
-        self.report({'INFO'}, f"LOD bakes finished. Output: {textures_dir}")
+        self.report({'INFO'}, f"LOD bakes finished. Output: {game_textures_root}")
         return {'FINISHED'}
 
 

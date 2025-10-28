@@ -10,7 +10,7 @@ class VIVID_OT_merge_udims(Operator):
     bl_description = "Merge baked UDIM tiles per LOD into a single square texture per map identifier (deletes tiles)."
 
     def execute(self, context):
-        # Resolve Release/Textures/LOD directory
+        # Resolve Release/Game/Textures directory (which contains LOD# subfolders)
         try:
             release_dir = _release_mirror_dir(context)
         except Exception:
@@ -20,18 +20,20 @@ class VIVID_OT_merge_udims(Operator):
                 return {'CANCELLED'}
             blend_dir = os.path.dirname(blend_path)
             release_dir = os.path.join(os.path.dirname(blend_dir), 'Release', os.path.basename(blend_dir))
-        textures_root = os.path.join(release_dir, 'Textures')
-        lod_root = os.path.join(textures_root, 'LOD')
+        textures_root = os.path.join(release_dir, 'Game', 'Textures')
+        lod_root = textures_root
         if not os.path.isdir(lod_root):
             self.report({'ERROR'}, f"Missing LOD textures directory: {lod_root}")
             return {'CANCELLED'}
 
-        # For each LOD subfolder under Textures/LOD, merge tiles
+        # For each LOD# subfolder under Game/Textures, merge tiles
         print(f"[UDIM-MERGE] Root: {lod_root}")
         merged_any = False
         for sub in sorted(os.listdir(lod_root)):
             subdir = os.path.join(lod_root, sub)
             if not os.path.isdir(subdir):
+                continue
+            if not sub.lower().startswith('lod'):
                 continue
             print(f"[UDIM-MERGE] Processing LOD folder: {subdir}")
             try:
@@ -115,7 +117,8 @@ def _merge_udims_for_lod(lod_out_dir: str):
 
 
 def _compose_images_grid(udim_path_pairs, grid_n, tile_w, tile_h, out_path, ext):
-    """Build the atlas via a temporary orthographic render (GPU), not the compositor.
+    """Build the atlas via a temporary orthographic render (GPU), not the compositor,
+    enforcing neutral color management and Non-Color sampling to avoid color transforms.
     udim_path_pairs: list of (udim, path) sorted by UDIM ascending.
     """
     import math
@@ -128,10 +131,21 @@ def _compose_images_grid(udim_path_pairs, grid_n, tile_w, tile_h, out_path, ext)
     scene.render.film_transparent = True
     try:
         scene.view_settings.view_transform = 'Standard'
+        scene.view_settings.look = 'None'
+        scene.view_settings.exposure = 0.0
+        scene.view_settings.gamma = 1.0
     except Exception:
         pass
     fmt_map = {'png': 'PNG', 'jpg': 'JPEG', 'jpeg': 'JPEG', 'tif': 'TIFF', 'tiff': 'TIFF', 'exr': 'OPEN_EXR'}
     scene.render.image_settings.file_format = fmt_map.get(ext.lower(), 'PNG')
+    # Set sensible color depths
+    try:
+        if ext.lower() in ('tif','tiff'):
+            scene.render.image_settings.color_depth = '16'
+        elif ext.lower() in ('png',):
+            scene.render.image_settings.color_depth = '8'
+    except Exception:
+        pass
 
     # Camera: orthographic framing [0..grid_n] x [0..grid_n]
     cam_data = bpy.data.cameras.new("VIVID_ATLAS_CAM")
@@ -154,6 +168,11 @@ def _compose_images_grid(udim_path_pairs, grid_n, tile_w, tile_h, out_path, ext)
             imgs_to_remove.append(img)
         except Exception:
             return None
+        # Ensure image is treated as data to avoid color conversion
+        try:
+            img.colorspace_settings.name = 'Non-Color'
+        except Exception:
+            pass
         # Material with Emission -> Output
         mat = bpy.data.materials.new(name="VIVID_ATLAS_TILE")
         mat.use_nodes = True
@@ -162,6 +181,11 @@ def _compose_images_grid(udim_path_pairs, grid_n, tile_w, tile_h, out_path, ext)
             nt.nodes.remove(n)
         n_img = nt.nodes.new('ShaderNodeTexImage')
         n_img.image = img
+        try:
+            n_img.image.colorspace_settings.name = 'Non-Color'
+            n_img.interpolation = 'Closest'
+        except Exception:
+            pass
         n_em  = nt.nodes.new('ShaderNodeEmission')
         n_out = nt.nodes.new('ShaderNodeOutputMaterial')
         nt.links.new(n_img.outputs['Color'], n_em.inputs['Color'])

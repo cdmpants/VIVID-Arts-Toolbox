@@ -35,8 +35,8 @@ class VIVID_OT_export_lods(bpy.types.Operator):
         except RuntimeError as e:
             self.report({'ERROR'}, str(e))
             return {'CANCELLED'}
-        # Tidy structure: export meshes into Release/Mesh
-        mesh_dir = os.path.join(release_dir, "Mesh")
+        # Tidy structure: export meshes into Release/Game/Mesh
+        mesh_dir = os.path.join(release_dir, "Game", "Mesh")
         os.makedirs(mesh_dir, exist_ok=True)
 
         # Collect LOD objects: any *_LOD0..3 and *_ShadowProxy[_LOD*] and colliders
@@ -66,6 +66,13 @@ class VIVID_OT_export_lods(bpy.types.Operator):
             merge_udims = bool(getattr(sprops, 'merge_udims', False)) if sprops else False
             did_remap = False
             saved_uv = None
+            # Temporarily strip materials during export; restore after
+            saved_mats = list(obj.data.materials) if getattr(obj.data, 'materials', None) else []
+            try:
+                if getattr(obj.data, 'materials', None):
+                    obj.data.materials.clear()
+            except Exception:
+                pass
             if merge_udims and any(obj.name.endswith(f"_LOD{i}") for i in (0,1,2,3)):
                 try:
                     # Determine UDIM tiles present on this object by scanning active UV layer
@@ -97,6 +104,14 @@ class VIVID_OT_export_lods(bpy.types.Operator):
                         _restore_uv_grid_remap(obj)
                     except Exception:
                         pass
+                # Restore materials
+                try:
+                    if getattr(obj.data, 'materials', None) is not None:
+                        obj.data.materials.clear()
+                        for m in saved_mats:
+                            obj.data.materials.append(m)
+                except Exception:
+                    pass
 
         if exported == 0:
             return {'CANCELLED'}
