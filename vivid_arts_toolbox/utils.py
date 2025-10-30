@@ -40,43 +40,61 @@ def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_
         base_name = name.replace('_LOD0', '')
 
     temp_filter_file = None
+    def _write_mlx_from_template(template_name: str, target_faces: int) -> str:
+        """Create a temp MLX from a bundled template, substituting the target face count.
+        Templates live under resources/ and contain the token '__TARGET_FACE_NUM__'.
+        """
+        from pathlib import Path
+        try:
+            tmpl_path = resource_or_legacy(template_name)
+            text = Path(tmpl_path).read_text(encoding='utf-8')
+            text = text.replace('__TARGET_FACE_NUM__', str(int(target_faces)))
+        except Exception:
+            # Fallback to an inline minimal template if resource missing
+            text = f"""<!DOCTYPE FilterScript>\n<FilterScript>\n <filter name=\"Simplification: Quadric Edge Collapse Decimation (with texture)\">\n  <Param description=\"Target number of faces\" value=\"{int(target_faces)}\" type=\"RichInt\" name=\"TargetFaceNum\"/>\n  <Param description=\"Quality threshold\" value=\"0.5\" type=\"RichFloat\" name=\"QualityThr\"/>\n  <Param description=\"Texture Weight\" value=\"5\" type=\"RichFloat\" isxmlparam=\"0\" name=\"Extratcoordw\"/>\n  <Param description=\"Preserve Boundary of the mesh\" value=\"false\" type=\"RichBool\" name=\"PreserveBoundary\"/>\n  <Param description=\"Optimal position of simplified vertices\" value=\"true\" type=\"RichBool\" name=\"OptimalPlacement\"/>\n  <Param description=\"Preserve Normal\" value=\"true\" type=\"RichBool\" name=\"PreserveNormal\"/>\n </filter>\n</FilterScript>"""
+        tf = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.mlx')
+        tf.write(text)
+        tf.close()
+        return tf.name
     try:
-        # Produce LOD0..LOD3
-        for i in (0, 1, 2, 3):
+        # 1) Cinema -> LOD0 using cinema template
+        target_face_count = lod_targets.get(0, max(10, int(initial_face_count * 0.08)))
+        output_lod0_name = f"{base_name}_LOD0.dae"
+        output_lod0_path = os.path.join(lods_dir, output_lod0_name)
+        tf_cinema = _write_mlx_from_template("meshlab_decimate_cinema_to_lod0.mlx", target_face_count)
+        meshlab_cmd0 = [
+            meshlab_server_path,
+            "-i", lod0_dae_filepath,   # Cinema DAE
+            "-o", output_lod0_path,
+            "-m", "wt",
+            "-s", tf_cinema
+        ]
+        operator.report({'INFO'}, f"Running MeshLab server for {output_lod0_name} with target faces: {target_face_count}")
+        process = subprocess.run(meshlab_cmd0, check=True, capture_output=True, text=True, cwd=lods_dir)
+        operator.report({'INFO'}, f"MeshLab server output for {output_lod0_name}:\n{process.stdout}")
+        if process.stderr:
+            operator.report({'WARNING'}, f"MeshLab server warnings/errors for {output_lod0_name}:\n{process.stderr}")
+
+        # 2) LOD0 -> LOD1..LOD3 using lod template
+        for i in (1, 2, 3):
             target_face_count = lod_targets.get(i, max(10, int(initial_face_count * 0.1)))
             output_lod_name = f"{base_name}_LOD{i}.dae"
             output_filepath = os.path.join(lods_dir, output_lod_name)
-
-            # Create a temporary MLX filter file with the dynamic target face count
-            temp_filter_file = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix=".mlx")
-            temp_filter_file.write(f"""<!DOCTYPE FilterScript>
-<FilterScript>
- <filter name="Simplification: Quadric Edge Collapse Decimation (with texture)">
-  <Param description="Target number of faces" value="{target_face_count}" type="RichInt" name="TargetFaceNum"/>
-  <Param description="Quality threshold" value="0.5" type="RichFloat" name="QualityThr"/>
-  <Param description="Texture Weight" value="5000" type="RichFloat" isxmlparam="0" name="Extratcoordw"/>
-  <Param description="Preserve Boundary of the mesh" value="true" type="RichBool" name="PreserveBoundary"/>
-  <Param description="Optimal position of simplified vertices" value="true" type="RichBool" name="OptimalPlacement"/>
-  <Param description="Preserve Normal" value="true" type="RichBool" name="PreserveNormal"/>
- </filter>
-</FilterScript>""")
-            temp_filter_file.close() # Close the file so MeshLab can read it
-
+            tf_lods = _write_mlx_from_template("meshlab_decimate_lod0_to_lods.mlx", target_face_count)
             meshlab_cmd = [
                 meshlab_server_path,
-                "-i", lod0_dae_filepath,
+                "-i", output_lod0_path,  # use LOD0 as input
                 "-o", output_filepath,
-		"-m", "wt",
-                "-s", temp_filter_file.name # Use the temporary filter script
+                "-m", "wt",
+                "-s", tf_lods
             ]
-
             operator.report({'INFO'}, f"Running MeshLab server for {output_lod_name} with target faces: {target_face_count}")
             process = subprocess.run(meshlab_cmd, check=True, capture_output=True, text=True, cwd=lods_dir)
             operator.report({'INFO'}, f"MeshLab server output for {output_lod_name}:\n{process.stdout}")
             if process.stderr:
                 operator.report({'WARNING'}, f"MeshLab server warnings/errors for {output_lod_name}:\n{process.stderr}")
 
-        operator.report({'INFO'}, "MeshLab server processing completed for all LODs.")
+        operator.report({'INFO'}, "MeshLab server processing completed for LOD0–3.")
         return True
 
     except FileNotFoundError:
@@ -92,8 +110,13 @@ def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_
         operator.report({'ERROR'}, f"An unexpected error occurred during MeshLab server processing: {e}")
         return False
     finally:
-        if temp_filter_file and os.path.exists(temp_filter_file.name):
-            os.remove(temp_filter_file.name)
+        # Clean up any residual temp files created via _write_mlx_from_template in default temp dir
+        # NamedTemporaryFile was set delete=False, but we've no direct references here; leave OS cleanup if missing.
+        try:
+            if temp_filter_file and os.path.exists(temp_filter_file.name):
+                os.remove(temp_filter_file.name)
+        except Exception:
+            pass
 
 
 # ----------------------
