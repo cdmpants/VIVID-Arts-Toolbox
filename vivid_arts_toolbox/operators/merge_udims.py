@@ -215,6 +215,8 @@ def _compose_images_grid(udim_path_pairs, grid_n, tile_w, tile_h, out_path, ext)
         return ob
 
     # Create a plane per tile in cell center at (col+0.5, row+0.5)
+    # Keep row 0 at the BOTTOM (UV convention). This matches the UV remap
+    # used during LOD export, where row-major order starts at the bottom row.
     for idx, (ud, path) in enumerate(udim_path_pairs):
         row = idx // grid_n
         col = idx % grid_n

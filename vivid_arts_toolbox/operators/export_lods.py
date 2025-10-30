@@ -55,6 +55,23 @@ class VIVID_OT_export_lods(bpy.types.Operator):
             self.report({'ERROR'}, "No LODs/Proxies found to export.")
             return {'CANCELLED'}
 
+        # Compute UDIM grid mapping per LOD index to match merge_udims.py logic.
+        # Merge step arranges tiles on a grid of size n = ceil(sqrt(total unique UDIMs in that LOD's baked textures)),
+        # placed row-major in ascending UDIM order. We mirror that here for UV remapping so meshes align with merged atlases.
+        lod_udims_map = {0: set(), 1: set(), 2: set(), 3: set()}
+        for o in lod_candidates:
+            for i in (0, 1, 2, 3):
+                if o.name.endswith(f"_LOD{i}"):
+                    try:
+                        for ud in _collect_udims(o):
+                            lod_udims_map[i].add(int(ud))
+                    except Exception:
+                        pass
+                    break
+        import math
+        lod_global_udims_sorted = {i: sorted(v) for i, v in lod_udims_map.items() if v}
+        lod_grid_n = {i: max(1, int(math.ceil(math.sqrt(len(v))))) for i, v in lod_global_udims_sorted.items()}
+
         exported = 0
         for obj in lod_candidates:
             bpy.ops.object.select_all(action='DESELECT')
@@ -78,7 +95,15 @@ class VIVID_OT_export_lods(bpy.types.Operator):
                     # Determine UDIM tiles present on this object by scanning active UV layer
                     udims = _collect_udims(obj)
                     if udims:
-                        _apply_uv_grid_remap(obj, udims)
+                        # Find this object's LOD index and use the global union for mapping/grid size
+                        lod_idx = None
+                        for i in (0, 1, 2, 3):
+                            if obj.name.endswith(f"_LOD{i}"):
+                                lod_idx = i
+                                break
+                        global_udims = lod_global_udims_sorted.get(lod_idx, sorted(set(udims)))
+                        n = lod_grid_n.get(lod_idx, max(1, int(math.ceil(math.sqrt(len(global_udims))))))
+                        _apply_uv_grid_remap(obj, udims, n, global_udims)
                         did_remap = True
                 except Exception:
                     did_remap = False
@@ -135,7 +160,7 @@ def _collect_udims(obj: bpy.types.Object) -> list[int]:
     return sorted(udims)
 
 
-def _apply_uv_grid_remap(obj: bpy.types.Object, udims: list[int]):
+def _apply_uv_grid_remap(obj: bpy.types.Object, udims: list[int], grid_n: int | None = None, global_udims: list[int] | None = None):
     """Scale and translate UVs from UDIM tiles into a square grid in 0..1 space.
     Deterministic order: sorted UDIM ascending, row-major.
     Stores original UVs on the mesh custom data layer for restoration.
@@ -149,8 +174,12 @@ def _apply_uv_grid_remap(obj: bpy.types.Object, udims: list[int]):
     backup = [(uv.uv.x, uv.uv.y) for uv in uv_layer.data]
     _UV_BACKUPS[me.as_pointer()] = backup
     # Build mapping
-    udims_sorted = sorted(set(int(u) for u in udims))
-    n = max(1, int(math.ceil(math.sqrt(len(udims_sorted)))))
+    # If provided, use the global UDIM ordering and grid size for the LOD to match merge_udims.py
+    if global_udims:
+        udims_sorted = [int(u) for u in global_udims]
+    else:
+        udims_sorted = sorted(set(int(u) for u in udims))
+    n = grid_n if grid_n and grid_n > 0 else max(1, int(math.ceil(math.sqrt(len(udims_sorted)))))
     # Map UDIM -> (row, col)
     index_map = {ud: i for i, ud in enumerate(udims_sorted)}
     # Helper to compute tile index from UV
