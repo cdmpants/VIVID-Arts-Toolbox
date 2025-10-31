@@ -245,7 +245,19 @@ class VIVID_OT_bake_delit(Operator):
                     return []
                 baked = []
                 # Determine tiles to bake
+                # Preference: if the material name contains a UDIM token (e.g., _1002), bake only that tile.
+                # Otherwise, fall back to all detected tiles (UDIM mode) or just (0,0).
                 tiles = uv_tiles if udim_mode else [(0,0)]
+                try:
+                    udim_token = _extract_udim(getattr(target_material, 'name', ''))
+                    if udim_token and udim_token.isdigit():
+                        udim_val = int(udim_token)
+                        if udim_val >= 1001:
+                            u_off = (udim_val - 1001) % 10
+                            v_off = (udim_val - 1001) // 10
+                            tiles = [(u_off, v_off)]
+                except Exception:
+                    pass
                 me = obj.data
                 uv_layer = me.uv_layers.active if hasattr(me, 'uv_layers') and me.uv_layers.active else None
                 for (u_off, v_off) in tiles:
@@ -345,24 +357,17 @@ class VIVID_OT_bake_delit(Operator):
                 except Exception:
                     pass
 
-        # Main material on object
-        baked_files.extend(bake_for_material(obj.active_material or (obj.material_slots[0].material if obj.material_slots else None), base_out_dir))
-
-        # Alternate materials: base_name_Part# created by baking procedure
-        import re
-        alt_mats = []
-        pat = re.compile(rf"^{re.escape(base_name)}_Part\d+$")
-        for m in bpy.data.materials:
-            if pat.match(m.name):
-                alt_mats.append(m)
-        for m in sorted(alt_mats, key=lambda x: x.name):
-            part_token = m.name.split('_')[-1]  # PartX
-            out_dir = os.path.join(base_out_dir, part_token)
-            os.makedirs(out_dir, exist_ok=True)
+        # Iterate through materials on the object in slot order and bake each one's BaseColor
+        seen = set()
+        for sl in obj.material_slots:
+            mat = sl.material
+            if not mat or mat.name in seen:
+                continue
+            seen.add(mat.name)
             try:
-                baked_files.extend(bake_for_material(m, out_dir, part_suffix=part_token))
+                baked_files.extend(bake_for_material(mat, base_out_dir))
             except Exception as e:
-                self.report({'ERROR'}, f"Bake failed for {m.name}: {e}")
+                self.report({'ERROR'}, f"Bake failed for material {mat.name}: {e}")
                 if prev_scene_denoise is not None: scene.cycles.use_denoising = prev_scene_denoise
                 if prev_layer_denoise is not None: context.view_layer.cycles.use_denoising = prev_layer_denoise
                 return {'CANCELLED'}
