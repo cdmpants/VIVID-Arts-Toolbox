@@ -130,7 +130,10 @@ def _compose_images_grid(udim_path_pairs, grid_n, tile_w, tile_h, out_path, ext)
     scene.render.resolution_percentage = 100
     scene.render.film_transparent = True
     try:
-        scene.view_settings.view_transform = 'Standard'
+        # Use Raw view transform to avoid any color/gamma conversions.
+        # We also set tile image nodes to Non-Color below so both color and data maps
+        # preserve their exact pixel values during the render atlas compose.
+        scene.view_settings.view_transform = 'Raw'
         scene.view_settings.look = 'None'
         scene.view_settings.exposure = 0.0
         scene.view_settings.gamma = 1.0

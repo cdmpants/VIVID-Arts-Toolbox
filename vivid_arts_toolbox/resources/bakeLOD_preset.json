@@ -211,7 +211,7 @@
     "enable_mip_diffusion": false,
     "low_scene_path": "//thearchive_2049/VIVID Arts Library/Production/Katlahraun/Model/KAT_Cliff_Short_01/BakeMesh/KAT_Cliff_Short_01_Optimized.fbx",
     "output_path": "Z:/SynologyDrive/Art/Photogrammetry/Iceland 2024/Katlahraun/Assets/KAT_GroundFormation_11/BakeTextures",
-    "padding_radius": 4,
+    "padding_radius": 512,
     "per_fragment_binormal": true,
     "recompute_tangents": false,
     "sbsoutput_place_into_specific_folder": false,
