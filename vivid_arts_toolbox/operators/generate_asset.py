@@ -73,6 +73,39 @@ class VIVID_OT_generate_asset(bpy.types.Operator):
             except Exception:
                 pass
 
+        # Apply all modifiers on the new Cinema object (do not affect Optimized)
+        try:
+            if context.view_layer.objects.get(new_obj.name) is None:
+                # Ensure it's in the active view layer; linking above should handle this.
+                pass
+        except Exception:
+            pass
+        try:
+            bpy.ops.object.mode_set(mode='OBJECT')
+        except Exception:
+            pass
+        try:
+            bpy.ops.object.select_all(action='DESELECT')
+        except Exception:
+            pass
+        try:
+            new_obj.select_set(True)
+            context.view_layer.objects.active = new_obj
+        except Exception:
+            pass
+
+        failed = []
+        try:
+            for m in list(getattr(new_obj, 'modifiers', []) or []):
+                try:
+                    bpy.ops.object.modifier_apply(modifier=m.name)
+                except Exception:
+                    failed.append(m.name)
+        except Exception:
+            pass
+        if failed:
+            self.report({'WARNING'}, f"Some modifiers could not be applied on {cinema_name}: {', '.join(failed)}")
+
         self.report({'INFO'}, f"Generated Cinema mesh: {cinema_name} in 'Cinema' collection.")
         return {'FINISHED'}
 

@@ -6,7 +6,7 @@ import sys # Import sys to get the executable path of the current Blender instan
 from pathlib import Path
 
 
-def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count, ratios=None):
+def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count, ratios=None, *, skip_lod0_generation: bool = False):
     """
     Generates LODs using meshlabserver.
     Requires MeshLab Server to be installed and path configured in preferences.
@@ -57,23 +57,30 @@ def generate_lods_with_meshlabserver(operator, context, lod0_dae_filepath, lods_
         tf.close()
         return tf.name
     try:
-        # 1) Cinema -> LOD0 using cinema template
-        target_face_count = lod_targets.get(0, max(10, int(initial_face_count * 0.08)))
         output_lod0_name = f"{base_name}_LOD0.dae"
         output_lod0_path = os.path.join(lods_dir, output_lod0_name)
-        tf_cinema = _write_mlx_from_template("meshlab_decimate_cinema_to_lod0.mlx", target_face_count)
-        meshlab_cmd0 = [
-            meshlab_server_path,
-            "-i", lod0_dae_filepath,   # Cinema DAE
-            "-o", output_lod0_path,
-            "-m", "wt",
-            "-s", tf_cinema
-        ]
-        operator.report({'INFO'}, f"Running MeshLab server for {output_lod0_name} with target faces: {target_face_count}")
-        process = subprocess.run(meshlab_cmd0, check=True, capture_output=True, text=True, cwd=lods_dir)
-        operator.report({'INFO'}, f"MeshLab server output for {output_lod0_name}:\n{process.stdout}")
-        if process.stderr:
-            operator.report({'WARNING'}, f"MeshLab server warnings/errors for {output_lod0_name}:\n{process.stderr}")
+
+        if skip_lod0_generation:
+            # Skip Cinema -> LOD0 reduction; write LOD0 as an unmodified copy for downstream steps.
+            import shutil
+            shutil.copyfile(lod0_dae_filepath, output_lod0_path)
+            operator.report({'INFO'}, f"Skipped LOD0 generation; wrote {output_lod0_name} as a copy of the Cinema DAE.")
+        else:
+            # 1) Cinema -> LOD0 using cinema template
+            target_face_count = lod_targets.get(0, max(10, int(initial_face_count * 0.08)))
+            tf_cinema = _write_mlx_from_template("meshlab_decimate_cinema_to_lod0.mlx", target_face_count)
+            meshlab_cmd0 = [
+                meshlab_server_path,
+                "-i", lod0_dae_filepath,   # Cinema DAE
+                "-o", output_lod0_path,
+                "-m", "wt",
+                "-s", tf_cinema
+            ]
+            operator.report({'INFO'}, f"Running MeshLab server for {output_lod0_name} with target faces: {target_face_count}")
+            process = subprocess.run(meshlab_cmd0, check=True, capture_output=True, text=True, cwd=lods_dir)
+            operator.report({'INFO'}, f"MeshLab server output for {output_lod0_name}:\n{process.stdout}")
+            if process.stderr:
+                operator.report({'WARNING'}, f"MeshLab server warnings/errors for {output_lod0_name}:\n{process.stderr}")
 
         # 2) LOD0 -> LOD1..LOD3 using lod template
         for i in (1, 2, 3):
@@ -193,7 +200,7 @@ def is_lod_name(name: str) -> bool:
     return re.search(r"_LOD\d+$", name) is not None
 
 
-def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count, ratios=None):
+def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj, initial_face_count, ratios=None, *, skip_lod0_generation: bool = False):
     """Helper function to encapsulate PyMeshLab logic."""
     try:
         import pymeshlab as ml
@@ -240,15 +247,17 @@ def generate_lods_with_pymeshlab(context, lod0_dae_filepath, lods_dir, lod0_obj,
             ms.clone_current_mesh()
             ms.set_current_mesh(ms.number_meshes() - 1)
 
-            ms.meshing_decimation_quadric_edge_collapse(
-                targetfacenum=target_faces,
-                qualitythr=0.5,
-                preserveboundary=True,
-                preservetopology=False,
-                preservenormal=True,
-                planarquadric=False,
-                selected=False
-            )
+            if i != 0 or not skip_lod0_generation:
+                ms.meshing_decimation_quadric_edge_collapse(
+                    targetfacenum=target_faces,
+                    qualitythr=0.5,
+                    preserveboundary=True,
+                    preservetopology=False,
+                    preservenormal=True,
+                    planarquadric=False,
+                    selected=False
+                )
+
             # Save current mesh to output
             ms.save_current_mesh(output_filepath)
 

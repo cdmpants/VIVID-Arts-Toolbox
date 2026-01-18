@@ -157,11 +157,123 @@ class VIVID_OT_import_simplified(Operator):
         return {'FINISHED'}
 
 
+class VIVID_OT_setup_normals_mesh(Operator):
+    bl_idname = "vivid.setup_normals_mesh"
+    bl_label = "Setup Normals Mesh"
+    bl_description = "Duplicate the Optimized mesh to _Normal, decimate it, and transfer custom normals back onto Optimized"
+
+    def execute(self, context):
+        dec_ratio = float(getattr(context.scene, 'vivid_normals_decimate_ratio', 0.16) or 0.16)
+        dec_ratio = max(0.0, min(1.0, dec_ratio))
+
+        def _iter_optimized_targets():
+            # Prefer the dedicated Optimized collection if present
+            opt_coll = bpy.data.collections.get('Optimized')
+            if opt_coll:
+                for o in list(opt_coll.objects):
+                    if o and o.type == 'MESH' and isinstance(o.name, str) and o.name.endswith('_Optimized'):
+                        yield o
+                return
+            # Fallback: scan all objects
+            for o in bpy.data.objects:
+                if o and o.type == 'MESH' and isinstance(o.name, str) and o.name.endswith('_Optimized'):
+                    yield o
+
+        optimized_objs = list(_iter_optimized_targets())
+        if not optimized_objs:
+            self.report({'ERROR'}, "No *_Optimized mesh objects found.")
+            return {'CANCELLED'}
+
+        created = 0
+        updated = 0
+        skipped = 0
+        for obj in optimized_objs:
+            base = re.sub(r'_Optimized$', '', obj.name)
+            normal_name = f"{base}_Normal"
+            normal_obj = bpy.data.objects.get(normal_name)
+
+            if normal_obj and normal_obj.type != 'MESH':
+                skipped += 1
+                continue
+
+            # Create *_Normal if missing
+            if not normal_obj:
+                normal_obj = obj.copy()
+                # Mesh-linked duplicate: share the same mesh datablock as *_Optimized
+                normal_obj.data = obj.data
+                normal_obj.name = normal_name
+                try:
+                    normal_obj.data.name = normal_name
+                except Exception:
+                    pass
+
+                # Link to the same collection(s) as optimized when possible
+                linked = False
+                try:
+                    for coll in getattr(obj, 'users_collection', []) or []:
+                        coll.objects.link(normal_obj)
+                        linked = True
+                        break
+                except Exception:
+                    linked = False
+                if not linked:
+                    try:
+                        context.scene.collection.objects.link(normal_obj)
+                    except Exception:
+                        pass
+                created += 1
+            else:
+                updated += 1
+
+            # Ensure *_Normal is mesh-linked to the Optimized mesh
+            try:
+                if getattr(normal_obj, 'data', None) is not obj.data:
+                    normal_obj.data = obj.data
+            except Exception:
+                pass
+
+            # Ensure Decimate modifier (Collapse) on *_Normal
+            try:
+                dec = normal_obj.modifiers.get("Decimate_Normal")
+                if not dec:
+                    dec = normal_obj.modifiers.new("Decimate_Normal", 'DECIMATE')
+                try:
+                    dec.decimate_type = 'COLLAPSE'
+                except Exception:
+                    pass
+                dec.ratio = dec_ratio
+            except Exception:
+                skipped += 1
+                continue
+
+            # Ensure Data Transfer modifier on *_Optimized
+            try:
+                mod = obj.modifiers.get("DataTransfer_Normals")
+                if not mod:
+                    mod = obj.modifiers.new("DataTransfer_Normals", 'DATA_TRANSFER')
+                mod.object = normal_obj
+                mod.use_loop_data = True
+                mod.data_types_loops = {'CUSTOM_NORMAL'}
+                # Nearest Face Interpolated (instead of Projected Face Interpolated)
+                mod.loop_mapping = 'POLYINTERP_NEAREST'
+            except Exception:
+                skipped += 1
+                continue
+
+        self.report({'INFO'}, f"Setup Normals Mesh complete: created {created}, updated {updated}, skipped {skipped}.")
+        return {'FINISHED'}
+
+
 def register():
     bpy.utils.register_class(VIVID_OT_import_simplified)
+    bpy.utils.register_class(VIVID_OT_setup_normals_mesh)
 
 
 def unregister():
+    try:
+        bpy.utils.unregister_class(VIVID_OT_setup_normals_mesh)
+    except Exception:
+        pass
     try:
         bpy.utils.unregister_class(VIVID_OT_import_simplified)
     except Exception:

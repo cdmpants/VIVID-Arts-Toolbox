@@ -29,6 +29,11 @@ class VIVID_PT_setup_lods(Panel):
             # Settings below are disabled when Custom LODs is enabled
             settings_col = box.column(align=True)
             settings_col.enabled = not bool(getattr(s, 'custom_lods', False))
+
+            # Additional LOD setup toggles
+            settings_col.prop(s, "generate_reflection_proxy")
+            settings_col.prop(s, "use_cinema_as_lod0")
+
             # Collider options and ratio
             row = settings_col.row(align=True)
             row.prop(s, "generate_collider")

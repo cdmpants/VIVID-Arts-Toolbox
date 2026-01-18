@@ -29,6 +29,13 @@ class VIVID_PT_import_source(Panel):
         else:
             col.label(text="Operator vivid.import_simplified not registered.", icon='ERROR')
 
+        # Setup Normals Mesh button + decimate slider
+        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "setup_normals_mesh"):
+            col.operator("vivid.setup_normals_mesh", text="Setup Normals Mesh", icon='MOD_DATA_TRANSFER')
+        else:
+            col.label(text="Operator vivid.setup_normals_mesh not registered.", icon='ERROR')
+        col.prop(context.scene, "vivid_normals_decimate_ratio", text="Decimate Ratio")
+
 class VIVID_PT_surface(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -280,6 +287,16 @@ def register():
             default=True,
         )
 
+    if not hasattr(bpy.types.Scene, "vivid_normals_decimate_ratio"):
+        bpy.types.Scene.vivid_normals_decimate_ratio = FloatProperty(
+            name="Decimate Ratio",
+            description="Decimate ratio for the generated _Normal mesh used as normals transfer source",
+            default=0.16,
+            min=0.0,
+            max=1.0,
+            precision=3,
+        )
+
 def unregister():
     for c in reversed(_classes):
         bpy.utils.unregister_class(c)
@@ -288,6 +305,7 @@ def unregister():
         "vivid_uv_udim_tiles","vivid_uv_pixel_margin","vivid_uv_texture_res",
         "vivid_metadata_reference_path",
         "vivid_import_simplified_as_optimized",
+        "vivid_normals_decimate_ratio",
     ):
         if hasattr(bpy.types.Scene, attr):
             delattr(bpy.types.Scene, attr)

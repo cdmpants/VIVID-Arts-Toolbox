@@ -33,6 +33,18 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
         default=False,
         description="Disable built-in LOD generation; you will manage LODs manually."
     )
+
+    __annotations__['generate_reflection_proxy'] = BoolProperty(
+        name="Generate Reflection Proxy",
+        default=False,
+        description="After LOD processing, duplicate LOD3 as a mesh-linked _RefProxy object."
+    )
+
+    __annotations__['use_cinema_as_lod0'] = BoolProperty(
+        name="Use Cinema as LOD0",
+        default=True,
+        description="Use a copy of the Cinema mesh as LOD0 and skip LOD0 reduction/generation."
+    )
     __annotations__['generate_shadow_proxies'] = BoolProperty(
         name="Generate ShadowProxies",
         default=True,

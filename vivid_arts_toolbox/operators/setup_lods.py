@@ -133,6 +133,7 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                     rf"^{re.escape(base_label)}_LOD[0-3]$",
                     rf"^{re.escape(base_label)}_MeshCollider$",
                     rf"^{re.escape(base_label)}_ShadowProxy(_LOD[0-3])?$",
+                    rf"^{re.escape(base_label)}_RefProxy$",
                 ]
                 for o in list(collection.objects):
                     for pat in patterns:
@@ -172,6 +173,44 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
             else:
                 # Make the operator idempotent per base_label in this collection
                 _remove_existing_lod_targets(lod_coll, base_label)
+
+            lod_names = []
+            use_cinema_as_lod0 = bool(getattr(sprops, 'use_cinema_as_lod0', True))
+            gen_reflection_proxy = bool(getattr(sprops, 'generate_reflection_proxy', False))
+
+            # Optionally create LOD0 immediately from Cinema so downstream steps (e.g., ShadowProxy) can rely on LOD0 existing.
+            if use_cinema_as_lod0:
+                try:
+                    lod0_obj = src.copy()
+                    lod0_obj.data = src.data.copy()
+                    lod0_obj.name = f"{base_label}_LOD0"
+                    try:
+                        lod0_obj.data.name = lod0_obj.name
+                    except Exception:
+                        pass
+                    try:
+                        lod0_obj.rotation_euler = (0, 0, 0)
+                        lod0_obj.rotation_quaternion = (1, 0, 0, 0)
+                    except Exception:
+                        pass
+                    # Link into LOD collection
+                    try:
+                        context.scene.collection.objects.link(lod0_obj)
+                    except Exception:
+                        pass
+                    for col in list(getattr(lod0_obj, 'users_collection', []) or []):
+                        if col is not lod_coll:
+                            try:
+                                col.objects.unlink(lod0_obj)
+                            except Exception:
+                                pass
+                    try:
+                        lod_coll.objects.link(lod0_obj)
+                    except Exception:
+                        pass
+                    lod_names.append(lod0_obj.name)
+                except Exception as e:
+                    raise RuntimeError(f"Failed to create LOD0 from Cinema: {e}")
             # Prepare paths
             blend_filepath = bpy.data.filepath
             if not blend_filepath:
@@ -231,12 +270,15 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
             face_count = len(src.data.polygons)
             # Compute effective ratios relative to Cinema so utils can stay unchanged:
             # r0 = LOD0_target / Cinema_faces; r1..3 = r0 * (ratio_of_LOD0)
-            try:
-                lod0_target = int(getattr(sprops, 'lod0_target_tris', 10000) or 10000)
-            except Exception:
-                # Fallback to legacy ratio if new prop missing
-                lod0_target = max(10, int(face_count * float(getattr(sprops, 'lod0_ratio', 0.08) or 0.08)))
-            r0 = max(10, lod0_target) / max(1, face_count)
+            if use_cinema_as_lod0:
+                r0 = 1.0
+            else:
+                try:
+                    lod0_target = int(getattr(sprops, 'lod0_target_tris', 10000) or 10000)
+                except Exception:
+                    # Fallback to legacy ratio if new prop missing
+                    lod0_target = max(10, int(face_count * float(getattr(sprops, 'lod0_ratio', 0.08) or 0.08)))
+                r0 = max(10, lod0_target) / max(1, face_count)
             r1_rel = float(getattr(sprops, 'lod1_ratio', 0.40) or 0.40)
             r2_rel = float(getattr(sprops, 'lod2_ratio', 0.16) or 0.16)
             r3_rel = float(getattr(sprops, 'lod3_ratio', 0.064) or 0.064)
@@ -248,14 +290,20 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
             }
             ok = False
             if getattr(prefs, 'enable_pymeshlab_automation', False):
-                ok = utils.generate_lods_with_pymeshlab(context, dae_path, lods_dir, src, face_count, ratios)
+                ok = utils.generate_lods_with_pymeshlab(
+                    context, dae_path, lods_dir, src, face_count, ratios,
+                    skip_lod0_generation=use_cinema_as_lod0,
+                )
             else:
-                ok = utils.generate_lods_with_meshlabserver(self, context, dae_path, lods_dir, src, face_count, ratios)
+                ok = utils.generate_lods_with_meshlabserver(
+                    self, context, dae_path, lods_dir, src, face_count, ratios,
+                    skip_lod0_generation=use_cinema_as_lod0,
+                )
             if not ok:
                 raise RuntimeError("LOD generation failed.")
 
             # Import LOD0–3 into LOD collection and reapply original materials
-            lod_names = []
+            # lod_names already contains LOD0 if use_cinema_as_lod0 is enabled
             # Determine filename prefix used by MeshLab outputs
             # For variants, outputs include "_Cinema_Var#"; for base, they strip "_Cinema"
             if '_Cinema_Var' in src.name:
@@ -264,7 +312,7 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 output_prefix = src.name[:-7]
             else:
                 output_prefix = base_label
-            for i in range(0, 4):
+            for i in range(1 if use_cinema_as_lod0 else 0, 4):
                 lod_path = os.path.join(lods_dir, f"{output_prefix}_LOD{i}.dae")
                 if not os.path.exists(lod_path):
                     raise RuntimeError(f"Missing {lod_path}")
@@ -400,6 +448,33 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                         mod.loop_mapping = 'POLYINTERP_LNORPROJ'
                     except Exception:
                         pass
+
+            # Optional Reflection Proxy: mesh-linked duplicate of LOD3 after processing
+            if gen_reflection_proxy:
+                lod3 = bpy.data.objects.get(f"{base_label}_LOD3")
+                if lod3:
+                    ref_name = re.sub(r'_LOD3$', '_RefProxy', lod3.name)
+                    if not bpy.data.objects.get(ref_name):
+                        try:
+                            ref = lod3.copy()
+                            ref.data = lod3.data  # mesh-linked
+                            ref.name = ref_name
+                            try:
+                                context.scene.collection.objects.link(ref)
+                            except Exception:
+                                pass
+                            for col in list(getattr(ref, 'users_collection', []) or []):
+                                if col is not lod_coll:
+                                    try:
+                                        col.objects.unlink(ref)
+                                    except Exception:
+                                        pass
+                            try:
+                                lod_coll.objects.link(ref)
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
 
         # Process all sources
         errs = []
