@@ -77,6 +77,12 @@ class VIVID_LightRemovalSettings(PropertyGroup):
     __annotations__['tile_y_threshold'] = FloatProperty(name="Threshold", default=0.5, min=0.0, max=1.0)
     __annotations__['tile_y_smoothness'] = FloatProperty(name="Smoothness", default=0.5, min=0.0, max=1.0)
     __annotations__['tile_y_contrast'] = FloatProperty(name="Contrast", default=0.5, min=0.0, max=1.0)
+    # Bake isolation
+    __annotations__['bake_isolation'] = BoolProperty(
+        name="Bake Isolation",
+        description="During each UDIM bake, isolate by moving non-target UVs far away and using CLIP sampling to prevent wrapped contributions",
+        default=False,
+    )
 
 class VIVID_OT_bake_delit(Operator):
     bl_idname = "vivid.bake_delit"
@@ -290,8 +296,16 @@ class VIVID_OT_bake_delit(Operator):
                     except Exception:
                         pass
                     nt.nodes.active = tex_node
+                    # If isolation is enabled, set node extension to CLIP to avoid UV wrapping
+                    prev_extension = None
+                    if bool(getattr(s, 'bake_isolation', False)):
+                        try:
+                            prev_extension = getattr(tex_node, 'extension', None)
+                            tex_node.extension = 'CLIP'
+                        except Exception:
+                            prev_extension = None
 
-                    # Offset UVs for faces in this tile
+                    # Offset UVs for faces in this tile; optionally push non-target UVs far away for isolation
                     saved_uvs = []
                     if uv_layer and me.polygons and me.loops:
                         try:
@@ -303,10 +317,16 @@ class VIVID_OT_bake_delit(Operator):
                             for poly in me.polygons:
                                 for li in poly.loop_indices:
                                     luv = uv_layer.data[li].uv
-                                    if int(math.floor(luv.x)) == u_off and int(math.floor(luv.y)) == v_off:
+                                    is_target = (int(math.floor(luv.x)) == u_off and int(math.floor(luv.y)) == v_off)
+                                    if is_target:
                                         saved_uvs.append((li, luv.x, luv.y))
                                         uv_layer.data[li].uv.x = luv.x - u_off
                                         uv_layer.data[li].uv.y = luv.y - v_off
+                                    elif bool(getattr(s, 'bake_isolation', False)):
+                                        # Push non-target UVs far away so they can't sample into 0..1 even with wrapping
+                                        saved_uvs.append((li, luv.x, luv.y))
+                                        uv_layer.data[li].uv.x = -1000.0
+                                        uv_layer.data[li].uv.y = -1000.0
                         except Exception:
                             saved_uvs = []
                     # Bake
@@ -323,6 +343,12 @@ class VIVID_OT_bake_delit(Operator):
                                 uv_layer.data[li].uv.y = uy
                         except Exception:
                             pass
+                        # restore node extension if changed
+                        if bool(getattr(s, 'bake_isolation', False)) and prev_extension is not None:
+                            try:
+                                tex_node.extension = prev_extension
+                            except Exception:
+                                pass
                         raise e
                     # Restore UVs
                     try:
@@ -331,6 +357,12 @@ class VIVID_OT_bake_delit(Operator):
                             uv_layer.data[li].uv.y = uy
                     except Exception:
                         pass
+                    # Restore node extension if changed
+                    if bool(getattr(s, 'bake_isolation', False)) and prev_extension is not None:
+                        try:
+                            tex_node.extension = prev_extension
+                        except Exception:
+                            pass
                     # Save
                     udim_str = f"{udim_num}"
                     outfile = os.path.join(out_dir, f"{base_name}_BaseColor_{udim_str}.tif") if not part_suffix else os.path.join(out_dir, f"{base_name}_{part_suffix}_BaseColor_{udim_str}.tif")
