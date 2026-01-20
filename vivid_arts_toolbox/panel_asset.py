@@ -93,7 +93,8 @@ class VIVID_PT_bake_textures(Panel):
             row = box.row(align=True); row.prop(s, "engine",              text="Engine")
             # Custom HighPoly override dir
             row = box.row(align=True); row.prop(s, "custom_highpoly_dir",  text="Custom HighPoly")
-            # AO slider exposed from AO baker (secondary.max_distance)
+            # AO samples + distance exposed from AO/AOWide bakers (secondary.sample_count / secondary.max_distance)
+            row = box.row(align=True); row.prop(s, "ao_samples", text="AO Samples")
             row = box.row(align=True); row.prop(s, "ao_secondary_max_distance", text="AO Max Distance")
             # Additional bakers (hidden by default)
             box.separator()

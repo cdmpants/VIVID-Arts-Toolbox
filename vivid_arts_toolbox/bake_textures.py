@@ -9,7 +9,7 @@ import shutil
 from pathlib import Path
 import re
 from bpy.types import Operator, PropertyGroup
-from bpy.props import BoolProperty, PointerProperty, EnumProperty, StringProperty, FloatProperty
+from bpy.props import BoolProperty, PointerProperty, EnumProperty, StringProperty, FloatProperty, IntProperty
 
 # ------------------------------------------------------------
 # Defaults & Paths
@@ -305,9 +305,11 @@ def _load_and_patch_json(src_json, files_map, output_dir, dest_json, res_px, set
                 'Position':     bool(getattr(settings, 'enable_position', False)),
             }
             ao_max = float(getattr(settings, 'ao_secondary_max_distance', 0.04))
+            ao_samples = int(getattr(settings, 'ao_samples', 128) or 128)
         except Exception:
             toggles = {}
             ao_max = None
+            ao_samples = None
 
         for baker in data.get('bakers', []) or []:
             if not isinstance(baker, dict):
@@ -323,8 +325,11 @@ def _load_and_patch_json(src_json, files_map, output_dir, dest_json, res_px, set
                 # Always keep required/default bakers on
                 params['is_selected'] = True
             # AO slider override
-            if ident == 'AO' and ao_max is not None:
-                params['secondary.max_distance'] = ao_max
+            if ident in ('AO', 'AOWide'):
+                if ao_max is not None:
+                    params['secondary.max_distance'] = ao_max
+                if ao_samples is not None:
+                    params['secondary.sample_count'] = int(ao_samples)
 
     # Save generated JSON
     with open(dest_json, "w", encoding="utf-8") as f:
@@ -751,6 +756,14 @@ class VIVID_DesignerBakeSettings(PropertyGroup):
         name="AO Max Distance",
         description="Controls AO baker secondary.max_distance in meters",
         default=0.04, min=0.0, soft_max=1.0, step=0.01, precision=4
+    )
+
+    __annotations__['ao_samples'] = IntProperty(
+        name="AO Samples",
+        description="Controls AO/AOWide secondary.sample_count",
+        default=128,
+        min=1,
+        soft_max=1024,
     )
     __annotations__['bake_resolution'] = EnumProperty(
         name="Bake Resolution",
