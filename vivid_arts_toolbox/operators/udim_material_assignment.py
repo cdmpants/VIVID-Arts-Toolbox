@@ -68,7 +68,11 @@ class VIVID_OT_udim_material_assignment(Operator):
         # Determine material base name (strip LOD/Collider/ShadowProxy suffixes)
         try:
             base_for_textures = obj.name
-            for suf in ("_LOD0","_LOD1","_LOD2","_LOD3","_MeshCollider","_ShadowProxy"):
+            for suf in (
+                "_LOD0","_LOD1","_LOD2","_LOD3",
+                "_MeshCollider",
+                "_ShadowProxyHigh","_ShadowProxyLow","_ShadowProxy",
+            ):
                 if base_for_textures.endswith(suf):
                     base_for_textures = base_for_textures[: -len(suf)]
             _, _, bake_tex = project_dirs()

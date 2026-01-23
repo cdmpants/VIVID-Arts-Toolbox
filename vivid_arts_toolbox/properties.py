@@ -46,9 +46,15 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
         description="Use a copy of the Cinema mesh as LOD0 and skip LOD0 reduction/generation."
     )
     __annotations__['generate_shadow_proxies'] = BoolProperty(
-        name="Generate ShadowProxies",
+        name="Generate High ShadowProxies",
         default=True,
-        description="Toggle creation of ShadowProxy meshes."
+        description="Toggle creation of high-detail ShadowProxy meshes."
+    )
+
+    __annotations__['generate_low_shadow_proxies'] = BoolProperty(
+        name="Generate Low ShadowProxies",
+        default=True,
+        description="Toggle creation of low-detail ShadowProxy meshes."
     )
     __annotations__['generate_collider'] = BoolProperty(
         name="Generate Collider",
@@ -88,10 +94,15 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
         default=0.05, min=0.0, max=1.0, precision=3
     )
     # Per-LOD ShadowProxy ratios
-    __annotations__['sp_lod0_ratio'] = FloatProperty(name="SP LOD0 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
-    __annotations__['sp_lod1_ratio'] = FloatProperty(name="SP LOD1 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
-    __annotations__['sp_lod2_ratio'] = FloatProperty(name="SP LOD2 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
-    __annotations__['sp_lod3_ratio'] = FloatProperty(name="SP LOD3 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
+    __annotations__['sp_lod0_ratio'] = FloatProperty(name="SP High LOD0 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
+    __annotations__['sp_lod1_ratio'] = FloatProperty(name="SP High LOD1 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
+    __annotations__['sp_lod2_ratio'] = FloatProperty(name="SP High LOD2 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
+    __annotations__['sp_lod3_ratio'] = FloatProperty(name="SP High LOD3 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
+
+    __annotations__['sp_low_lod0_ratio'] = FloatProperty(name="SP Low LOD0 Ratio", default=0.02, min=0.0, max=1.0, precision=3)
+    __annotations__['sp_low_lod1_ratio'] = FloatProperty(name="SP Low LOD1 Ratio", default=0.04, min=0.0, max=1.0, precision=3)
+    __annotations__['sp_low_lod2_ratio'] = FloatProperty(name="SP Low LOD2 Ratio", default=0.08, min=0.0, max=1.0, precision=3)
+    __annotations__['sp_low_lod3_ratio'] = FloatProperty(name="SP Low LOD3 Ratio", default=0.15, min=0.0, max=1.0, precision=3)
 
     # LOD Cage generation settings
     __annotations__['displace_cage_strength'] = FloatProperty(

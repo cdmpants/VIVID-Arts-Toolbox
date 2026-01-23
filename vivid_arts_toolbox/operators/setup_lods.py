@@ -8,12 +8,13 @@ from .. import preferences
 import math
 
 
-# === VIVID: ShadowProxy naming helper ===
-def _vat_make_shadowproxy_name(obj_name: str) -> str:
+# === VIVID: ShadowProxy naming helpers ===
+def _vat_make_shadowproxy_name(obj_name: str, kind: str) -> str:
+    """Create a name like '<Base>_<kind>_LOD#' from '<Base>_LOD#'."""
     m = re.search(r'(.*)(_LOD\d+)$', obj_name)
     if m:
-        return f"{m.group(1)}_ShadowProxy{m.group(2)}"
-    return f"{obj_name}_ShadowProxy"
+        return f"{m.group(1)}_{kind}{m.group(2)}"
+    return f"{obj_name}_{kind}"
 
 
 def _collect_cinema_sources():
@@ -132,6 +133,9 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 patterns = [
                     rf"^{re.escape(base_label)}_LOD[0-3]$",
                     rf"^{re.escape(base_label)}_MeshCollider$",
+                    rf"^{re.escape(base_label)}_ShadowProxyHigh(_LOD[0-3])?$",
+                    rf"^{re.escape(base_label)}_ShadowProxyLow(_LOD[0-3])?$",
+                    # Back-compat cleanup for legacy names
                     rf"^{re.escape(base_label)}_ShadowProxy(_LOD[0-3])?$",
                     rf"^{re.escape(base_label)}_RefProxy$",
                 ]
@@ -374,19 +378,33 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                 except Exception:
                     pass
 
-            # ShadowProxies, with per-LOD ratios
-            gen_sp = bool(getattr(sprops, 'generate_shadow_proxies', True))
-            if gen_sp:
-                def _sp_ratio_for(name: str) -> float:
-                    if name.endswith('_LOD0'):
-                        return float(getattr(sprops, 'sp_lod0_ratio', 0.2))
-                    if name.endswith('_LOD1'):
-                        return float(getattr(sprops, 'sp_lod1_ratio', 0.2))
-                    if name.endswith('_LOD2'):
-                        return float(getattr(sprops, 'sp_lod2_ratio', 0.2))
-                    if name.endswith('_LOD3'):
-                        return float(getattr(sprops, 'sp_lod3_ratio', 0.2))
-                    return 0.2
+            # ShadowProxies (High + Low), with per-LOD ratios
+            gen_sp_high = bool(getattr(sprops, 'generate_shadow_proxies', True))
+            gen_sp_low = bool(getattr(sprops, 'generate_low_shadow_proxies', True))
+
+            def _sp_ratio_high(name: str) -> float:
+                if name.endswith('_LOD0'):
+                    return float(getattr(sprops, 'sp_lod0_ratio', 0.2))
+                if name.endswith('_LOD1'):
+                    return float(getattr(sprops, 'sp_lod1_ratio', 0.2))
+                if name.endswith('_LOD2'):
+                    return float(getattr(sprops, 'sp_lod2_ratio', 0.2))
+                if name.endswith('_LOD3'):
+                    return float(getattr(sprops, 'sp_lod3_ratio', 0.2))
+                return 0.2
+
+            def _sp_ratio_low(name: str) -> float:
+                if name.endswith('_LOD0'):
+                    return float(getattr(sprops, 'sp_low_lod0_ratio', 0.02))
+                if name.endswith('_LOD1'):
+                    return float(getattr(sprops, 'sp_low_lod1_ratio', 0.04))
+                if name.endswith('_LOD2'):
+                    return float(getattr(sprops, 'sp_low_lod2_ratio', 0.08))
+                if name.endswith('_LOD3'):
+                    return float(getattr(sprops, 'sp_low_lod3_ratio', 0.15))
+                return 0.05
+
+            def _make_shadowproxies(kind: str, ratio_fn, dec_name: str):
                 for src_name in lod_names:
                     src_obj = bpy.data.objects.get(src_name)
                     if not src_obj:
@@ -396,13 +414,16 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                     context.view_layer.objects.active = src_obj
                     bpy.ops.object.duplicate_move()
                     sp = context.active_object
-                    sp.name = _vat_make_shadowproxy_name(src_obj.name)
-                    sp.data.name = _vat_make_shadowproxy_name(src_obj.data.name)
+                    sp.name = _vat_make_shadowproxy_name(src_obj.name, kind)
+                    try:
+                        sp.data.name = _vat_make_shadowproxy_name(src_obj.data.name, kind)
+                    except Exception:
+                        pass
                     for col in list(sp.users_collection):
                         col.objects.unlink(sp)
                     lod_coll.objects.link(sp)
-                    dec = sp.modifiers.new("Decimate_ShadowProxy", 'DECIMATE')
-                    dec.ratio = _sp_ratio_for(src_obj.name)
+                    dec = sp.modifiers.new(dec_name, 'DECIMATE')
+                    dec.ratio = float(ratio_fn(src_obj.name))
                     dec.use_collapse_triangulate = True
                     # Remove materials and UVs from shadow proxy
                     try:
@@ -415,6 +436,11 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                             uvs.remove(uvs[0])
                     except Exception:
                         pass
+
+            if gen_sp_high:
+                _make_shadowproxies("ShadowProxyHigh", _sp_ratio_high, "Decimate_ShadowProxyHigh")
+            if gen_sp_low:
+                _make_shadowproxies("ShadowProxyLow", _sp_ratio_low, "Decimate_ShadowProxyLow")
 
             # Rename UV layers
             for o in lod_coll.objects:
