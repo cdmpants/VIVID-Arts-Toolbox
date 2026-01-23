@@ -306,10 +306,44 @@ def _load_and_patch_json(src_json, files_map, output_dir, dest_json, res_px, set
             }
             ao_max = float(getattr(settings, 'ao_secondary_max_distance', 0.04))
             ao_samples = int(getattr(settings, 'ao_samples', 128) or 128)
+            transfer_vcols = bool(getattr(settings, 'transfer_highpoly_vertex_colors', False))
         except Exception:
             toggles = {}
             ao_max = None
             ao_samples = None
+            transfer_vcols = False
+
+        # If requested, inject VertexColorTransfer baker and disable the standard BaseColor transfer.
+        vcol_baker = None
+        if transfer_vcols:
+            try:
+                from .utils import resource_or_legacy
+                vcol_json = str(resource_or_legacy("bake_vertexcolor_preset.json"))
+                with open(vcol_json, 'r', encoding='utf-8') as vf:
+                    vdata = json.load(vf)
+                # Prefer identifier match; allow multiple bakers but we only need VertexColorTransfer
+                for b in vdata.get('bakers', []) or []:
+                    if isinstance(b, dict) and (b.get('identifier') == 'VertexColorTransfer'):
+                        vcol_baker = b
+                        break
+            except Exception:
+                vcol_baker = None
+
+            try:
+                existing = {b.get('identifier') for b in (data.get('bakers', []) or []) if isinstance(b, dict)}
+                if vcol_baker and 'VertexColorTransfer' not in existing:
+                    # Insert near the top, where BaseColorTransfer usually sits
+                    data.setdefault('bakers', [])
+                    insert_at = 0
+                    for idx, b in enumerate(list(data.get('bakers') or [])):
+                        if not isinstance(b, dict):
+                            continue
+                        if b.get('identifier') == 'BaseColorTransfer' or b.get('baker') == 'TextureTransfer.Raytraced':
+                            insert_at = idx
+                            break
+                    data['bakers'].insert(insert_at, vcol_baker)
+            except Exception:
+                pass
 
         for baker in data.get('bakers', []) or []:
             if not isinstance(baker, dict):
@@ -324,6 +358,11 @@ def _load_and_patch_json(src_json, files_map, output_dir, dest_json, res_px, set
             else:
                 # Always keep required/default bakers on
                 params['is_selected'] = True
+
+            # When transferring vertex colors, disable the normal BaseColor texture transfer baker.
+            if transfer_vcols and (ident == 'BaseColorTransfer' or baker.get('baker') == 'TextureTransfer.Raytraced'):
+                params['is_selected'] = False
+
             # AO slider override
             if ident in ('AO', 'AOWide'):
                 if ao_max is not None:
@@ -751,6 +790,11 @@ class VIVID_DesignerBakeSettings(PropertyGroup):
         name="Setup Material",
         description="Create/assign a Delighter-based material on the _Optimized object using baked textures",
         default=True
+    )
+    __annotations__['transfer_highpoly_vertex_colors'] = BoolProperty(
+        name="Transfer HighPoly Vertex Colors",
+        description="Disable BaseColor texture transfer and instead bake vertex colors from HighPoly into BaseColor",
+        default=False,
     )
     __annotations__['ao_secondary_max_distance'] = FloatProperty(
         name="AO Max Distance",

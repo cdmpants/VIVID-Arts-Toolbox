@@ -1,0 +1,81 @@
+{
+    "Common": {
+        "base.uv_set": 0,
+        "output_format": "png",
+        "output_name": "$(scenename)_$(bakername)",
+        "output_size": [
+            2048,
+            2048
+        ],
+        "selected_meshes": [
+        ]
+    },
+    "CommonProjection": {
+        "cage_scene_path": "",
+        "cull_backfaces": true,
+        "high_scene_paths": [
+        ],
+        "hit_strategy": "inward",
+        "max_depth": 0.009999999776482582,
+        "max_height": 0.009999999776482582,
+        "mesh_match_mode": "match_all",
+        "normalized_distance": true,
+        "offset_map_path": "",
+        "sampling_rate": "none",
+        "skew_correction": false,
+        "skew_map_invert": false,
+        "skew_map_path": "",
+        "smooth_normals": true,
+        "use_cage": false,
+        "use_lowdef_as_highdef": false
+    },
+    "bakers": [
+        {
+            "baker": "Color.Raytraced",
+            "identifier": "VertexColorTransfer",
+            "parameters": {
+                "base.uv_set": "Value from Common/base.uv_set",
+                "cage_scene_path": "Value from CommonProjection/cage_scene_path",
+                "color_generator": "hue_shift",
+                "color_source": "vertex",
+                "high_scene_paths": "Value from CommonProjection/high_scene_paths",
+                "is_selected": true,
+                "output_format": "Value from Common/output_format",
+                "output_name": "Value from Common/output_name",
+                "output_size": "Value from Common/output_size",
+                "projection.cull_backfaces": "Value from CommonProjection/cull_backfaces",
+                "projection.hit_strategy": "Value from CommonProjection/hit_strategy",
+                "projection.max_depth": "Value from CommonProjection/max_depth",
+                "projection.max_height": "Value from CommonProjection/max_height",
+                "projection.mesh_match_mode": "Value from CommonProjection/mesh_match_mode",
+                "projection.normalized_distance": "Value from CommonProjection/normalized_distance",
+                "projection.offset_map_path": "Value from CommonProjection/offset_map_path",
+                "projection.sampling_rate": "Value from CommonProjection/sampling_rate",
+                "projection.skew_map_invert": "Value from CommonProjection/skew_map_invert",
+                "projection.skew_map_path": "Value from CommonProjection/skew_map_path",
+                "projection.smooth_normals": "Value from CommonProjection/smooth_normals",
+                "selected_meshes": "Value from Common/selected_meshes",
+                "skew_correction": "Value from CommonProjection/skew_correction",
+                "use_cage": "Value from CommonProjection/use_cage",
+                "use_lowdef_as_highdef": "Value from CommonProjection/use_lowdef_as_highdef"
+            }
+        }
+    ],
+    "enable_mip_diffusion": true,
+    "low_scene_path": "Z:/SynologyDrive/Art/Photogrammetry/Iceland 2024/Kleifarvatn/Assets/KLE_Formation_Cliff_Huge_04/BakeMesh/KLE_Formation_Cliff_Huge_04_Optimized.fbx",
+    "output_path": "C:/Users/Christopher/Documents/Adobe/Adobe Substance 3D Designer",
+    "padding_radius": 2,
+    "per_fragment_binormal": true,
+    "recompute_tangents": false,
+    "sbsoutput_place_into_specific_folder": false,
+    "sbsoutput_resource_method": "linked",
+    "settingsInfo": {
+        "version": 2
+    },
+    "uv_tiles": [
+        [
+            0,
+            0
+        ]
+    ]
+}

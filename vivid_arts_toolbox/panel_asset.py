@@ -89,6 +89,7 @@ class VIVID_PT_bake_textures(Panel):
         if s:
             row = box.row(align=True); row.prop(s, "export_bake_meshes", text="Export Bake Meshes")
             row = box.row(align=True); row.prop(s, "setup_material",      text="Setup Material")
+            row = box.row(align=True); row.prop(s, "transfer_highpoly_vertex_colors", text="Transfer HighPoly Vertex Colors")
             row = box.row(align=True); row.prop(s, "bake_resolution",     text="Bake Resolution")
             row = box.row(align=True); row.prop(s, "engine",              text="Engine")
             # Custom HighPoly override dir
