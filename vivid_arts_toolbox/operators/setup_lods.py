@@ -60,6 +60,19 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
             return {'CANCELLED'}
 
         def _proc_one(src: bpy.types.Object):
+            def _remove_data_transfer_modifiers(obj: bpy.types.Object):
+                if not obj:
+                    return
+                try:
+                    mods = list(getattr(obj, 'modifiers', []) or [])
+                except Exception:
+                    mods = []
+                for m in mods:
+                    try:
+                        if getattr(m, 'type', None) == 'DATA_TRANSFER':
+                            obj.modifiers.remove(m)
+                    except Exception:
+                        pass
             # Helper: assign faces by UDIM using only existing materials on the mesh
             def _assign_faces_by_udim_existing_mats(obj: bpy.types.Object):
                 me = obj.data
@@ -181,7 +194,7 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
 
             lod_names = []
             use_cinema_as_lod0 = bool(getattr(sprops, 'use_cinema_as_lod0', True))
-            gen_reflection_proxy = bool(getattr(sprops, 'generate_reflection_proxy', False))
+            gen_reflection_proxy = bool(getattr(sprops, 'generate_reflection_proxy', True))
 
             # Optionally create LOD0 immediately from Cinema so downstream steps (e.g., ShadowProxy) can rely on LOD0 existing.
             if use_cinema_as_lod0:
@@ -396,13 +409,13 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
 
             def _sp_ratio_low(name: str) -> float:
                 if name.endswith('_LOD0'):
-                    return float(getattr(sprops, 'sp_low_lod0_ratio', 0.02))
+                    return float(getattr(sprops, 'sp_low_lod0_ratio', 0.01))
                 if name.endswith('_LOD1'):
-                    return float(getattr(sprops, 'sp_low_lod1_ratio', 0.04))
+                    return float(getattr(sprops, 'sp_low_lod1_ratio', 0.02))
                 if name.endswith('_LOD2'):
-                    return float(getattr(sprops, 'sp_low_lod2_ratio', 0.08))
+                    return float(getattr(sprops, 'sp_low_lod2_ratio', 0.04))
                 if name.endswith('_LOD3'):
-                    return float(getattr(sprops, 'sp_low_lod3_ratio', 0.15))
+                    return float(getattr(sprops, 'sp_low_lod3_ratio', 0.06))
                 return 0.05
 
             def _make_shadowproxies(kind: str, ratio_fn, dec_name: str):
@@ -423,6 +436,10 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                     for col in list(sp.users_collection):
                         col.objects.unlink(sp)
                     lod_coll.objects.link(sp)
+
+                    # Shadow proxies should never carry Data Transfer modifiers.
+                    _remove_data_transfer_modifiers(sp)
+
                     dec = sp.modifiers.new(dec_name, 'DECIMATE')
                     dec.ratio = float(ratio_fn(src_obj.name))
                     dec.use_collapse_triangulate = True
@@ -504,7 +521,7 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                                 col.objects.unlink(ref)
                             lod_coll.objects.link(ref)
 
-                            r = float(getattr(sprops, 'refproxy_ratio', 0.25) or 0.25)
+                            r = float(getattr(sprops, 'refproxy_ratio', 0.15) or 0.15)
                             r = max(0.0, min(1.0, r))
                             dec = ref.modifiers.new("Decimate_RefProxy", 'DECIMATE')
                             try:
@@ -540,6 +557,9 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                             for col in list(sp.users_collection):
                                 col.objects.unlink(sp)
                             lod_coll.objects.link(sp)
+
+                            # Shadow proxies should never carry Data Transfer modifiers.
+                            _remove_data_transfer_modifiers(sp)
 
                             r2 = float(getattr(sprops, 'refproxy_sp_ratio', 0.20) or 0.20)
                             r2 = max(0.0, min(1.0, r2))

@@ -58,22 +58,6 @@ class VIVID_PT_surface(Panel):
         else:
             col.label(text="Operator vivid.generate_surface not registered.", icon='ERROR')
 
-class VIVID_PT_uv_mapping(Panel):
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_category   = "Asset"
-    bl_parent_id  = "VIVID_PT_main_panel_asset"
-    bl_label      = "UV Mapping"
-    bl_order      = 3
-    def draw(self, context):
-        layout = self.layout
-        box = layout.box()
-        col = box.column(align=True)
-        col.prop(context.scene, "vivid_uv_udim_tiles", text="UDIM")
-        col.prop(context.scene, "vivid_uv_pixel_margin", text="Pixel Margin")
-        col.prop(context.scene, "vivid_uv_texture_res", text="Texture Resolution")
-        col.operator("vivid.unwrap_uvs", text="Unwrap UVs", icon='UV')
-
 class VIVID_PT_bake_textures(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -230,7 +214,6 @@ _classes = (
     # New: Import Source panel at the very top
     # defined below
     VIVID_PT_surface,
-    VIVID_PT_uv_mapping,
     VIVID_PT_bake_textures,
     VIVID_PT_generate_asset,
     VIVID_PT_export_to_painter,
@@ -254,26 +237,6 @@ def register():
             name="Meters Y",
             description="Height of the generated surface in meters",
             default=2.0, min=0.01, soft_max=1000.0,
-        )
-    if not hasattr(bpy.types.Scene, "vivid_uv_udim_tiles"):
-        bpy.types.Scene.vivid_uv_udim_tiles = EnumProperty(
-            name="UDIM",
-            description="Number of UDIM tiles (None = 0). Not wired yet.",
-            items=[('0','None',''),*[(str(i),str(i),'') for i in range(2,17)]],
-            default='0'
-        )
-    if not hasattr(bpy.types.Scene, "vivid_uv_pixel_margin"):
-        bpy.types.Scene.vivid_uv_pixel_margin = IntProperty(
-            name="Pixel Margin",
-            description="UV packing pixel margin. Packer will use 1/8 of selected Texture Resolution internally.",
-            default=3, min=0, soft_max=128,
-        )
-    if not hasattr(bpy.types.Scene, "vivid_uv_texture_res"):
-        bpy.types.Scene.vivid_uv_texture_res = EnumProperty(
-            name="Texture Resolution",
-            description="Target texel density for UV packing (internally 1/8 of this will be used).",
-            items=[(str(v), f"{v}", "") for v in (256,512,1024,2048,4096,8192)],
-            default='8192'
         )
     if not hasattr(bpy.types.Scene, "vivid_metadata_reference_path"):
         bpy.types.Scene.vivid_metadata_reference_path = StringProperty(
@@ -304,7 +267,6 @@ def unregister():
         bpy.utils.unregister_class(c)
     for attr in (
         "vivid_surface_dim_x","vivid_surface_dim_y",
-        "vivid_uv_udim_tiles","vivid_uv_pixel_margin","vivid_uv_texture_res",
         "vivid_metadata_reference_path",
         "vivid_import_simplified_as_optimized",
         "vivid_normals_decimate_ratio",

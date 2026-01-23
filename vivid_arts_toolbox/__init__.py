@@ -38,7 +38,6 @@ from .operators import light_removal   # existing
 # NEW: Export to Painter under operators/
 from .operators import export_to_painter
 from .operators import generate_surface
-from .operators import unwrap_uvs
 from .operators import setup_materials
 from .operators import udim_material_assignment
 from .operators import import_source
@@ -89,7 +88,7 @@ def register():
     # Proactively unregister any legacy monolithic panels (panel.py) if they linger from older sessions
     try:
         _legacy = [
-            'VIVID_PT_main_panel_asset','VIVID_PT_surface','VIVID_PT_uv_mapping','VIVID_PT_bake_textures',
+            'VIVID_PT_main_panel_asset','VIVID_PT_surface','VIVID_PT_bake_textures',
             'VIVID_PT_generate_asset','VIVID_PT_export_asset','VIVID_PT_export_to_painter','VIVID_PT_texture_processing',
             'VIVID_PT_main_panel_lods','VIVID_PT_setup_lods','VIEW3D_PT_shadowproxy_correction',
             'VIVID_PT_main_panel_meta','VIVID_PT_metadata'
@@ -113,7 +112,6 @@ def register():
     shadowproxy_correction.register()
     light_removal.register()
     generate_surface.register()
-    unwrap_uvs.register()
     metadata.register()
     setup_materials.register()
     udim_material_assignment.register()
@@ -133,7 +131,6 @@ def unregister():
     light_removal.unregister()
     shadowproxy_correction.unregister()
     generate_surface.unregister()
-    unwrap_uvs.unregister()
     metadata.unregister()
     try:
         udim_material_assignment.unregister()
