@@ -138,6 +138,7 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                     # Back-compat cleanup for legacy names
                     rf"^{re.escape(base_label)}_ShadowProxy(_LOD[0-3])?$",
                     rf"^{re.escape(base_label)}_RefProxy$",
+                    rf"^{re.escape(base_label)}_RefProxy_ShadowProxy$",
                 ]
                 for o in list(collection.objects):
                     for pat in patterns:
@@ -475,30 +476,79 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                     except Exception:
                         pass
 
-            # Optional Reflection Proxy: mesh-linked duplicate of LOD3 after processing
+            # Optional Reflection Proxy: based on LOD3 after processing
             if gen_reflection_proxy:
                 lod3 = bpy.data.objects.get(f"{base_label}_LOD3")
                 if lod3:
                     ref_name = re.sub(r'_LOD3$', '_RefProxy', lod3.name)
+                    ref_sp_name = f"{ref_name}_ShadowProxy"
+
+                    # Create RefProxy (independent mesh) and apply decimate
                     if not bpy.data.objects.get(ref_name):
                         try:
-                            ref = lod3.copy()
-                            ref.data = lod3.data  # mesh-linked
+                            bpy.ops.object.select_all(action='DESELECT')
+                            lod3.select_set(True)
+                            context.view_layer.objects.active = lod3
+                            bpy.ops.object.duplicate_move()
+                            ref = context.active_object
                             ref.name = ref_name
                             try:
-                                context.scene.collection.objects.link(ref)
+                                ref.data = lod3.data.copy()
                             except Exception:
                                 pass
-                            for col in list(getattr(ref, 'users_collection', []) or []):
-                                if col is not lod_coll:
-                                    try:
-                                        col.objects.unlink(ref)
-                                    except Exception:
-                                        pass
                             try:
-                                lod_coll.objects.link(ref)
+                                ref.data.name = ref_name
                             except Exception:
                                 pass
+                            for col in list(ref.users_collection):
+                                col.objects.unlink(ref)
+                            lod_coll.objects.link(ref)
+
+                            r = float(getattr(sprops, 'refproxy_ratio', 0.25) or 0.25)
+                            r = max(0.0, min(1.0, r))
+                            dec = ref.modifiers.new("Decimate_RefProxy", 'DECIMATE')
+                            try:
+                                dec.decimate_type = 'COLLAPSE'
+                            except Exception:
+                                pass
+                            dec.ratio = r
+                            try:
+                                bpy.ops.object.modifier_apply(modifier=dec.name)
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+
+                    # Create RefProxy ShadowProxy from RefProxy (unapplied decimate)
+                    ref_obj = bpy.data.objects.get(ref_name)
+                    if ref_obj and not bpy.data.objects.get(ref_sp_name):
+                        try:
+                            bpy.ops.object.select_all(action='DESELECT')
+                            ref_obj.select_set(True)
+                            context.view_layer.objects.active = ref_obj
+                            bpy.ops.object.duplicate_move()
+                            sp = context.active_object
+                            sp.name = ref_sp_name
+                            try:
+                                sp.data = ref_obj.data.copy()
+                            except Exception:
+                                pass
+                            try:
+                                sp.data.name = ref_sp_name
+                            except Exception:
+                                pass
+                            for col in list(sp.users_collection):
+                                col.objects.unlink(sp)
+                            lod_coll.objects.link(sp)
+
+                            r2 = float(getattr(sprops, 'refproxy_sp_ratio', 0.20) or 0.20)
+                            r2 = max(0.0, min(1.0, r2))
+                            dec2 = sp.modifiers.new("Decimate_RefProxyShadowProxy", 'DECIMATE')
+                            try:
+                                dec2.decimate_type = 'COLLAPSE'
+                            except Exception:
+                                pass
+                            dec2.ratio = r2
                         except Exception:
                             pass
 

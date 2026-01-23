@@ -64,6 +64,13 @@ class VIVID_PT_setup_lods(Panel):
             sp_low_col.prop(s, "sp_low_lod1_ratio", text="SP Low LOD1")
             sp_low_col.prop(s, "sp_low_lod2_ratio", text="SP Low LOD2")
             sp_low_col.prop(s, "sp_low_lod3_ratio", text="SP Low LOD3")
+
+            # Reflection Proxy ratios
+            rp_box = settings_col.box()
+            rp_box.label(text="Reflection Proxy Ratios")
+            rp_col = rp_box.column(align=True)
+            rp_col.prop(s, "refproxy_ratio", text="RefProxy")
+            rp_col.prop(s, "refproxy_sp_ratio", text="RefProxy SP")
         else:
             box.label(text="Scene LOD properties not found (scene.vivid_lod_props).", icon='INFO')
         col = layout.column(align=True)
