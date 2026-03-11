@@ -3,6 +3,8 @@ import os
 from bpy.types import Operator
 import re
 
+from .. import utils
+
 
 def _blend_dir():
     return bpy.path.abspath("//")
@@ -264,12 +266,87 @@ class VIVID_OT_setup_normals_mesh(Operator):
         return {'FINISHED'}
 
 
+class VIVID_OT_setup_color_grid(Operator):
+    bl_idname = "vivid.setup_color_grid"
+    bl_label = "Setup Color Grid"
+    bl_description = "Remove materials from *_Optimized mesh(es) and assign a Grid material using ColorGrid.png"
+
+    def execute(self, context):
+        def _iter_optimized_targets():
+            opt_coll = bpy.data.collections.get('Optimized')
+            if opt_coll:
+                for o in list(opt_coll.objects):
+                    if o and o.type == 'MESH' and isinstance(o.name, str) and o.name.endswith('_Optimized'):
+                        yield o
+                return
+            for o in bpy.data.objects:
+                if o and o.type == 'MESH' and isinstance(o.name, str) and o.name.endswith('_Optimized'):
+                    yield o
+
+        targets = list(_iter_optimized_targets())
+        if not targets:
+            self.report({'ERROR'}, "No *_Optimized mesh objects found.")
+            return {'CANCELLED'}
+
+        img_path = str(utils.resource_or_legacy("ColorGrid.png"))
+        if not os.path.isfile(img_path):
+            self.report({'ERROR'}, f"Missing resource: {img_path}")
+            return {'CANCELLED'}
+
+        try:
+            img = bpy.data.images.load(img_path, check_existing=True)
+        except Exception as e:
+            self.report({'ERROR'}, f"Failed to load ColorGrid.png: {e}")
+            return {'CANCELLED'}
+
+        mat = bpy.data.materials.get("Grid")
+        if not mat:
+            mat = bpy.data.materials.new("Grid")
+        mat.use_nodes = True
+        nt = mat.node_tree
+        nodes = nt.nodes
+        links = nt.links
+        for n in list(nodes):
+            nodes.remove(n)
+        out = nodes.new("ShaderNodeOutputMaterial")
+        out.location = (300, 0)
+        bsdf = nodes.new("ShaderNodeBsdfPrincipled")
+        bsdf.location = (0, 0)
+        tex = nodes.new("ShaderNodeTexImage")
+        tex.location = (-300, 0)
+        tex.image = img
+        links.new(tex.outputs.get("Color"), bsdf.inputs.get("Base Color"))
+        links.new(bsdf.outputs.get("BSDF"), out.inputs.get("Surface"))
+
+        updated = 0
+        skipped = 0
+        for obj in targets:
+            me = getattr(obj, 'data', None)
+            if not me:
+                skipped += 1
+                continue
+            try:
+                me.materials.clear()
+                me.materials.append(mat)
+                updated += 1
+            except Exception:
+                skipped += 1
+
+        self.report({'INFO'}, f"Setup Color Grid complete: updated {updated}, skipped {skipped}.")
+        return {'FINISHED'}
+
+
 def register():
     bpy.utils.register_class(VIVID_OT_import_simplified)
     bpy.utils.register_class(VIVID_OT_setup_normals_mesh)
+    bpy.utils.register_class(VIVID_OT_setup_color_grid)
 
 
 def unregister():
+    try:
+        bpy.utils.unregister_class(VIVID_OT_setup_color_grid)
+    except Exception:
+        pass
     try:
         bpy.utils.unregister_class(VIVID_OT_setup_normals_mesh)
     except Exception:

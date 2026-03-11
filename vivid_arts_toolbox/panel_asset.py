@@ -36,6 +36,12 @@ class VIVID_PT_import_source(Panel):
             col.label(text="Operator vivid.setup_normals_mesh not registered.", icon='ERROR')
         col.prop(context.scene, "vivid_normals_decimate_ratio", text="Decimate Ratio")
 
+        # Setup Color Grid button
+        if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "setup_color_grid"):
+            col.operator("vivid.setup_color_grid", text="Setup Color Grid", icon='TEXTURE')
+        else:
+            col.label(text="Operator vivid.setup_color_grid not registered.", icon='ERROR')
+
 class VIVID_PT_surface(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'

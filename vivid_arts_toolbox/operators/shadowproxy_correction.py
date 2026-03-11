@@ -167,6 +167,10 @@ def find_pairs(verbose=False):
     prox_pfx=re.compile(rf"^{re.escape(PROXY)}_(.+?)_{re.escape(LOD)}(\d+)$",re.IGNORECASE)
     LOD_lower,PROXY_lower=LOD.lower(),PROXY.lower()
 
+    # Special case: RefProxy shadow proxies are not LOD-indexed.
+    refproxy_rx = re.compile(r"^(.+?)_RefProxy$", re.IGNORECASE)
+    refproxy_sp_rx = re.compile(r"^(.+?)_RefProxy_ShadowProxy$", re.IGNORECASE)
+
     def parse_proxy_tolerant(name):
         low=name.lower(); idx=low.rfind("_"+LOD_lower)
         if idx==-1: return None
@@ -182,10 +186,23 @@ def find_pairs(verbose=False):
         return None
 
     lod_map, proxies = {}, []
+    refproxy_map, refproxy_shadows = {}, []
     for obj in bpy.data.objects:
         if obj.type!="MESH":
             continue
         name=_norm_name(obj.name); low=name.lower()
+
+        # RefProxy pairing (explicit)
+        m = refproxy_sp_rx.match(name)
+        if m:
+            base = _norm_name(m.group(1))
+            refproxy_shadows.append((base, obj))
+            continue
+        m = refproxy_rx.match(name)
+        if m:
+            base = _norm_name(m.group(1))
+            refproxy_map[base] = obj
+            continue
 
         # Prioritize proxy classification
         if PROXY_lower in low:
@@ -215,6 +232,14 @@ def find_pairs(verbose=False):
             pairs.append((shp,lod_obj))
         else:
             print(f"[ShadowProxyFit] WARN: No matching LOD for '{shp.name}' (expected '{base}_{LOD}{lod}')")
+
+    # Add RefProxy shadow proxy pairs
+    for base, shp in refproxy_shadows:
+        ref = refproxy_map.get(base)
+        if ref:
+            pairs.append((shp, ref))
+        else:
+            print(f"[ShadowProxyFit] WARN: No matching RefProxy for '{shp.name}' (expected '{base}_RefProxy')")
 
     print(f"[ShadowProxyFit] Pairs found: {len(pairs)}")
     for shp,lod in pairs: print(f"  - {shp.name} -> {lod.name}")
