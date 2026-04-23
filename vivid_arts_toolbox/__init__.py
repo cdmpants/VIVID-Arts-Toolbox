@@ -5,7 +5,7 @@ bl_info = {
     "version": (1, 0, 1),  # bumped
     "blender": (4, 3, 0),
     "location": "3D Viewport > N Panel > VIVID Arts Toolbox",
-    "description": "Automates photogrammetry processing for video games with Blender, MeshLab, and Substance Designer.",
+    "description": "Automates photogrammetry processing for video games with Blender and Substance Designer.",
     "category": "Import-Export",
 }
 

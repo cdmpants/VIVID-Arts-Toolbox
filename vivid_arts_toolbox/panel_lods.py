@@ -45,6 +45,13 @@ class VIVID_PT_setup_lods(Panel):
             col.prop(s, "lod1_ratio", text="LOD1 Ratio (of LOD0)")
             col.prop(s, "lod2_ratio", text="LOD2 Ratio (of LOD0)")
             col.prop(s, "lod3_ratio", text="LOD3 Ratio (of LOD0)")
+            # UV preservation weights
+            uv_box = settings_col.box()
+            uv_box.label(text="UV Decimation Weights")
+            uv_col = uv_box.column(align=True)
+            uv_col.prop(s, "uv1_decimation_weight", text="UVMap Weight")
+            uv_col.prop(s, "uv2_decimation_weight", text="Lightmap Weight")
+            uv_col.prop(s, "preserve_open_edges", text="Preserve Open Edges")
             # ShadowProxy High toggle and per-LOD ratios (vertical)
             settings_col.prop(s, "generate_shadow_proxies", text="Generate High ShadowProxies")
             sp_box = settings_col.box()

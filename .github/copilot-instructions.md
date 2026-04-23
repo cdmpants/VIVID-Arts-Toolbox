@@ -3,10 +3,11 @@ The repository is a Blender add-on (Python) that automates photogrammetry workfl
 Keep changes small and Blender-aware: this codebase registers Blender UI panels, PropertyGroups, and Operators. Files to inspect for patterns:
 - `vivid_arts_toolbox/__init__.py` — addon register/unregister flow and what classes self-register vs. require `bpy.utils.register_class`.
 - `vivid_arts_toolbox/panel.py` — UI layout and how operators are exposed (e.g. `vivid.generate_asset`, `vivid.setup_lods`). Use these ids when creating tests or calling ops.
-- `vivid_arts_toolbox/preferences.py` — exact preference names used by runtime code (e.g. `painter_exe_path`, `texture_export_dir`, `meshlab_executable_path`, `enable_pymeshlab_automation`).
+- `vivid_arts_toolbox/preferences.py` — exact preference names used by runtime code (e.g. `painter_exe_path`, `texture_export_dir`).
 - `vivid_arts_toolbox/properties.py` — PropertyGroup names and fields (e.g. `VIVID_PG_BakeProperties`, `vivid_lod_props`) that are attached to `bpy.types.Scene`.
 - DEPRECATED: `vivid_arts_toolbox/vivid_painter_export.py` — superseded by `vivid_arts_toolbox/operators/export_to_painter.py` which now contains the UI and backend (`run_export`, `_find_optimized_obj`, `_proj_dirs`). Use `operators.export_to_painter.run_export` in any scripts or tests.
-- `vivid_arts_toolbox/utils.py` and `operators/*` — LOD and baking helpers that call external tools (meshlabserver, PyMeshLab, Substance baker, external Blender invocation).
+- `vivid_arts_toolbox/decimate.py` — meshoptimizer-based mesh decimation with multi-UV support. Requires compiled `meshoptimizer.dll` in `vivid_arts_toolbox/lib/`.
+- `vivid_arts_toolbox/utils.py` and `operators/*` — LOD and baking helpers that call external tools (Substance baker, external Blender invocation).
 - `vivid_arts_toolbox/resources/*` — bundled non-Python assets (blend/json/spp/spexp, readme). Resolve paths via `utils.resource_or_legacy()`.
 
 Quick rules for edits
@@ -19,7 +20,7 @@ Developer workflows & testing notes
   1) Install (or load) the folder as an add-on in Blender's Preferences -> Add-ons, or run `bpy.ops.wm.addon_install` programmatically.
   2) Enable the add-on and open the 3D Viewport -> N Panel -> "VIVID Arts Toolbox".
 - Many functions require a saved .blend file and scene objects; to test `export_to_painter.run_export` run inside Blender with an active object named `*_Optimized` and a saved .blend (see `_proj_dirs`).
-- PyMeshLab automation: preferences flag `enable_pymeshlab_automation` controls usage. If enabled, the README UI shows how to pip-install into Blender's Python; prefer detection and helpful error messages rather than silent failures.
+- LOD generation uses meshoptimizer via `decimate.py`. The compiled DLL is loaded at runtime via ctypes. Run `build_meshopt.py` to compile from meshoptimizer source.
 
 Conventions and patterns to follow in PRs
 - Registration: modules with `register()`/`unregister()` (e.g., `operators/*.py`) should be imported in `__init__.py` and wired in the top-level `register()`/`unregister()` order. Note: `vivid_painter_export.py` is deprecated; `operators/export_to_painter.py` self-registers via top-level functions and is imported in `__init__.py`.

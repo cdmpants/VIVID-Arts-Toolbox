@@ -110,6 +110,22 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
         description="Decimate ratio for MeshCollider generation from LOD0.",
         default=0.05, min=0.0, max=1.0, precision=3
     )
+    # UV preservation weights for meshoptimizer decimation
+    __annotations__['uv1_decimation_weight'] = FloatProperty(
+        name="UV1 Weight (UVMap)",
+        description="meshoptimizer weight for the primary UV channel. Higher = stricter preservation.",
+        default=1.0, min=0.0, soft_max=5.0, precision=2
+    )
+    __annotations__['uv2_decimation_weight'] = FloatProperty(
+        name="UV2 Weight (Lightmap)",
+        description="meshoptimizer weight for the secondary UV channel. Higher = stricter preservation.",
+        default=0.5, min=0.0, soft_max=5.0, precision=2
+    )
+    __annotations__['preserve_open_edges'] = BoolProperty(
+        name="Preserve Open Edges",
+        description="Lock non-manifold boundary edges during meshoptimizer decimation. Disable to allow open scan bottoms and silhouette edges to reduce.",
+        default=False,
+    )
     # Per-LOD ShadowProxy ratios
     __annotations__['sp_lod0_ratio'] = FloatProperty(name="SP High LOD0 Ratio", default=0.20, min=0.0, max=1.0, precision=3)
     __annotations__['sp_lod1_ratio'] = FloatProperty(name="SP High LOD1 Ratio", default=0.20, min=0.0, max=1.0, precision=3)

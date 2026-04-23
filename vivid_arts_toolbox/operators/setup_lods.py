@@ -1,10 +1,8 @@
 # vivid_arts_toolbox/operators/setup_lods.py
 
 import bpy
-import os
 import re
-from .. import utils
-from .. import preferences
+from ..decimate import decimate_to_new_object
 import math
 
 
@@ -46,7 +44,6 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
         self.report({'INFO'}, "Starting Setup LODs process...")
 
         sprops = getattr(context.scene, 'vivid_lod_props', None)
-        prefs = context.preferences.addons[__package__.split('.')[0]].preferences
 
         # Determine source objects to process (base + variants)
         sources = []
@@ -229,168 +226,89 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                     lod_names.append(lod0_obj.name)
                 except Exception as e:
                     raise RuntimeError(f"Failed to create LOD0 from Cinema: {e}")
-            # Prepare paths
-            blend_filepath = bpy.data.filepath
-            if not blend_filepath:
-                raise RuntimeError("Save your .blend file first!")
-            blend_dir = os.path.dirname(blend_filepath)
-            lods_dir = os.path.join(blend_dir, "LODs")
-            os.makedirs(lods_dir, exist_ok=True)
-
-            # Capture original materials from source (Cinema) — do not modify src slots
+            # Capture original materials from source (Cinema)
             original_mats = list(src.data.materials)
-            self.report({'INFO'}, "Preparing temporary Color Grid for export...")
-            temp_img = bpy.data.images.new(
-                f"{base_label}_ColorGrid",
-                width=64,
-                height=64,
-                alpha=True,
-                float_buffer=False
-            )
-            temp_img.generated_type = 'COLOR_GRID'
-            temp_mat = bpy.data.materials.new(f"{base_label}_TempExportMat")
-            temp_mat.use_nodes = True
-            nt = temp_mat.node_tree; nodes = nt.nodes; links = nt.links
-            for n in list(nodes):
-                nodes.remove(n)
-            out = nodes.new("ShaderNodeOutputMaterial"); out.location = (300, 0)
-            bsdf = nodes.new("ShaderNodeBsdfPrincipled"); bsdf.location = (0, 0)
-            tex = nodes.new("ShaderNodeTexImage"); tex.location = (-300, 0); tex.image = temp_img
-            links.new(tex.outputs["Color"], bsdf.inputs["Base Color"])
-            links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
-            # Duplicate the source object with a single-user mesh and assign the temp material for export only
-            dup = src.copy()
-            dup.data = src.data.copy()
-            try:
-                context.scene.collection.objects.link(dup)
-            except Exception:
-                pass
-            dup.matrix_world = src.matrix_world.copy()
-            dup.data.materials.clear(); dup.data.materials.append(temp_mat)
-
-            # Export the duplicate to DAE for external pipeline
-            dae_path = os.path.join(lods_dir, f"{base_label}_Cinema.dae")
-            bpy.ops.object.select_all(action='DESELECT')
-            dup.select_set(True)
-            context.view_layer.objects.active = dup
-            bpy.ops.wm.collada_export(filepath=dae_path, selected=True, apply_modifiers=True)
-            # Remove duplicate object and its mesh
-            try:
-                mesh_ref = dup.data
-                bpy.data.objects.remove(dup, do_unlink=True)
-                if mesh_ref and mesh_ref.users == 0:
-                    bpy.data.meshes.remove(mesh_ref, do_unlink=True)
-            except Exception:
-                pass
-            self.report({'INFO'}, f"Exported {dae_path}")
-
-            # Generate LOD0–3 with MeshLab/PyMeshLab
             face_count = len(src.data.polygons)
-            # Compute effective ratios relative to Cinema so utils can stay unchanged:
-            # r0 = LOD0_target / Cinema_faces; r1..3 = r0 * (ratio_of_LOD0)
-            if use_cinema_as_lod0:
-                r0 = 1.0
-            else:
-                try:
-                    lod0_target = int(getattr(sprops, 'lod0_target_tris', 10000) or 10000)
-                except Exception:
-                    # Fallback to legacy ratio if new prop missing
-                    lod0_target = max(10, int(face_count * float(getattr(sprops, 'lod0_ratio', 0.08) or 0.08)))
-                r0 = max(10, lod0_target) / max(1, face_count)
-            r1_rel = float(getattr(sprops, 'lod1_ratio', 0.40) or 0.40)
-            r2_rel = float(getattr(sprops, 'lod2_ratio', 0.16) or 0.16)
-            r3_rel = float(getattr(sprops, 'lod3_ratio', 0.064) or 0.064)
-            ratios = {
-                0: float(r0),
-                1: float(r0 * r1_rel),
-                2: float(r0 * r2_rel),
-                3: float(r0 * r3_rel),
-            }
-            ok = False
-            if getattr(prefs, 'enable_pymeshlab_automation', False):
-                ok = utils.generate_lods_with_pymeshlab(
-                    context, dae_path, lods_dir, src, face_count, ratios,
-                    skip_lod0_generation=use_cinema_as_lod0,
-                )
-            else:
-                ok = utils.generate_lods_with_meshlabserver(
-                    self, context, dae_path, lods_dir, src, face_count, ratios,
-                    skip_lod0_generation=use_cinema_as_lod0,
-                )
-            if not ok:
-                raise RuntimeError("LOD generation failed.")
 
-            # Import LOD0–3 into LOD collection and reapply original materials
-            # lod_names already contains LOD0 if use_cinema_as_lod0 is enabled
-            # Determine filename prefix used by MeshLab outputs
-            # For variants, outputs include "_Cinema_Var#"; for base, they strip "_Cinema"
-            if '_Cinema_Var' in src.name:
-                output_prefix = src.name
-            elif src.name.endswith('_Cinema'):
-                output_prefix = src.name[:-7]
+            # Build UV weight dict from source mesh layers and scene properties
+            uv_wt = {}
+            src_uvs = src.data.uv_layers
+            if src_uvs:
+                uv1_w = float(getattr(sprops, 'uv1_decimation_weight', 1.0) or 1.0)
+                uv2_w = float(getattr(sprops, 'uv2_decimation_weight', 0.5) or 0.5)
+                if len(src_uvs) >= 1:
+                    uv_wt[src_uvs[0].name] = uv1_w
+                if len(src_uvs) >= 2:
+                    uv_wt[src_uvs[1].name] = uv2_w
+            preserve_open_edges = bool(getattr(sprops, 'preserve_open_edges', False))
+
+            # Determine LOD face-count targets
+            if use_cinema_as_lod0:
+                lod0_faces = face_count
             else:
-                output_prefix = base_label
-            for i in range(1 if use_cinema_as_lod0 else 0, 4):
-                lod_path = os.path.join(lods_dir, f"{output_prefix}_LOD{i}.dae")
-                if not os.path.exists(lod_path):
-                    raise RuntimeError(f"Missing {lod_path}")
-                bpy.ops.wm.collada_import(filepath=lod_path, import_units=True, find_chains=True)
-                lod = context.selected_objects[0] if context.selected_objects else None
-                if not lod:
-                    continue
-                lod.name = f"{base_label}_LOD{i}"
-                lod.data.name = f"{base_label}_LOD{i}"
+                lod0_faces = max(10, int(getattr(sprops, 'lod0_target_tris', 10000) or 10000))
+            lod_targets = {
+                0: lod0_faces,
+                1: max(10, int(lod0_faces * float(getattr(sprops, 'lod1_ratio', 0.40) or 0.40))),
+                2: max(10, int(lod0_faces * float(getattr(sprops, 'lod2_ratio', 0.16) or 0.16))),
+                3: max(10, int(lod0_faces * float(getattr(sprops, 'lod3_ratio', 0.064) or 0.064))),
+            }
+
+            # --- Generate LOD0 (if not using Cinema copy) ---
+            if not use_cinema_as_lod0:
+                lod0 = decimate_to_new_object(
+                    src, lod_targets[0], f"{base_label}_LOD0",
+                    uv_weights=uv_wt, lock_boundary=preserve_open_edges,
+                )
+                lod_coll.objects.link(lod0)
+                lod0.rotation_euler = (0, 0, 0)
+                lod0.rotation_quaternion = (1, 0, 0, 0)
+                bpy.ops.object.select_all(action='DESELECT')
+                lod0.select_set(True)
+                context.view_layer.objects.active = lod0
+                bpy.ops.object.shade_smooth()
+                for m in original_mats:
+                    lod0.data.materials.append(m)
+                _assign_faces_by_udim_existing_mats(lod0)
+                _prune_unused_materials(lod0)
+                lod_names.append(lod0.name)
+                self.report({'INFO'}, f"Generated {lod0.name} ({len(lod0.data.polygons)} faces)")
+
+            # --- Generate LOD1–3 from LOD0 ---
+            lod0_obj = bpy.data.objects.get(f"{base_label}_LOD0")
+            if not lod0_obj:
+                raise RuntimeError("LOD0 not found; cannot generate LOD1-3")
+            for i in (1, 2, 3):
+                lod = decimate_to_new_object(
+                    lod0_obj, lod_targets[i], f"{base_label}_LOD{i}",
+                    uv_weights=uv_wt, lock_boundary=preserve_open_edges,
+                )
+                lod_coll.objects.link(lod)
                 lod.rotation_euler = (0, 0, 0)
                 lod.rotation_quaternion = (1, 0, 0, 0)
+                bpy.ops.object.select_all(action='DESELECT')
+                lod.select_set(True)
+                context.view_layer.objects.active = lod
                 bpy.ops.object.shade_smooth()
-                for col in list(lod.users_collection):
-                    col.objects.unlink(lod)
-                lod_coll.objects.link(lod)
-                # Reapply original materials
-                lod.data.materials.clear()
                 for m in original_mats:
                     lod.data.materials.append(m)
-                # Assign faces by UDIM using the existing Cinema materials only, then prune extras
                 _assign_faces_by_udim_existing_mats(lod)
                 _prune_unused_materials(lod)
                 lod_names.append(lod.name)
+                self.report({'INFO'}, f"Generated {lod.name} ({len(lod.data.polygons)} faces)")
 
-            # (moved) Data Transfer setup will occur at the very end using LOD0 as the source
-
-            # Optional MeshCollider from imported LOD0
+            # --- MeshCollider from LOD0 (preserves UVs for runtime raycast painting) ---
             gen_collider = bool(getattr(sprops, 'generate_collider', True))
             collider_ratio = float(getattr(sprops, 'collider_ratio', 0.05))
-            if gen_collider and bpy.data.objects.get(f"{base_label}_LOD0"):
-                bpy.ops.object.select_all(action='DESELECT')
-                lod0_imp = bpy.data.objects.get(f"{base_label}_LOD0")
-                lod0_imp.select_set(True)
-                context.view_layer.objects.active = lod0_imp
-                bpy.ops.object.duplicate_move()
-                collider = context.active_object
-                collider.name = f"{base_label}_MeshCollider"
-                collider.data.name = collider.name
-                for col in list(collider.users_collection):
-                    col.objects.unlink(collider)
+            if gen_collider and lod0_obj:
+                collider_target = max(10, int(len(lod0_obj.data.polygons) * collider_ratio))
+                collider = decimate_to_new_object(
+                    lod0_obj, collider_target, f"{base_label}_MeshCollider",
+                    uv_weights=uv_wt, lock_boundary=preserve_open_edges,
+                )
                 lod_coll.objects.link(collider)
-                dec = collider.modifiers.new("Decimate_Collider", 'DECIMATE')
-                dec.ratio = collider_ratio
-                dec.use_collapse_triangulate = True
-                # Remove materials and UVs from collider (left as-is visually)
-                try:
-                    collider.data.materials.clear()
-                except Exception:
-                    pass
-                try:
-                    uvs = collider.data.uv_layers
-                    while uvs and len(uvs) > 0:
-                        uvs.remove(uvs[0])
-                except Exception:
-                    pass
-                # Viewport wireframe for mesh collider
-                try:
-                    collider.display_type = 'WIRE'
-                except Exception:
-                    pass
+                collider.display_type = 'WIRE'
+                self.report({'INFO'}, f"Generated {collider.name} ({len(collider.data.polygons)} faces)")
 
             # ShadowProxies (High + Low), with per-LOD ratios
             gen_sp_high = bool(getattr(sprops, 'generate_shadow_proxies', True))
@@ -468,12 +386,6 @@ class VIVID_OT_setup_lods(bpy.types.Operator):
                         uvs[0].name = 'UVMap'
                     if len(uvs) > 1:
                         uvs[1].name = 'Lightmap'
-
-            # Cleanup temp assets
-            if temp_mat.name in bpy.data.materials:
-                bpy.data.materials.remove(temp_mat, do_unlink=True)
-            if temp_img.name in bpy.data.images:
-                bpy.data.images.remove(temp_img, do_unlink=True)
 
             # Data Transfer (normals) — apply at the end: use imported LOD0 as the source, skip LOD0 itself
             src_lod0 = bpy.data.objects.get(f"{base_label}_LOD0")

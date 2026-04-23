@@ -19,22 +19,11 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
         default=os.path.join(addon_dir, "SDesigner_Photogrammetry.json"),
         description="Path to your Substance Designer JSON preset file. Defaults to local addon file."
     )
-    __annotations__['meshlab_executable_path'] = StringProperty(
-        name="MeshLab Server Path",
-        subtype='FILE_PATH',
-        description="Full path to meshlabserver.exe. Used if PyMeshLab automation is disabled or fails.",
-        default=""
-    )
     __annotations__['substance_baker_path'] = StringProperty(
         name="Substance Baker (substance3d_baker.exe)",
         description="Path to Adobe Substance 3D Designer's headless baker executable",
         subtype='FILE_PATH',
         default=""
-    )
-    __annotations__['enable_pymeshlab_automation'] = BoolProperty(
-        name="Enable PyMeshLab Automation",
-        default=False,
-        description="Use PyMeshLab library for LOD generation (requires installation). Disable for manual MeshLab or meshlabserver.exe fallback."
     )
     # NEW — Painter integration
     __annotations__['painter_exe_path'] = StringProperty(
@@ -70,33 +59,8 @@ class VIVID_Arts_Toolbox_Preferences(bpy.types.AddonPreferences):
                     self.painter_exe_path = cand
         except Exception:
             pass
-        try:
-            if not self.meshlab_executable_path:
-                cand = r"V:\\Dropbox\\Software\\meshlab_windows_portable\\meshlabserver.exe"
-                if os.path.isfile(cand):
-                    self.meshlab_executable_path = cand
-        except Exception:
-            pass
 
         layout.prop(self, "release_directory")
         layout.prop(self, "substance_baker_path")
-        # Substance Painter path shown inline after Substance Baker
         layout.prop(self, "painter_exe_path")
-
-        layout.separator()
-        layout.label(text="LOD Generation Options:", icon='INFO')
-        layout.prop(self, "enable_pymeshlab_automation")
-
-        if self.enable_pymeshlab_automation:
-            layout.label(text="PyMeshLab is enabled. Ensure it's installed in Blender's Python.", icon='FILE_SCRIPT')
-            box = layout.box()
-            box.label(text="Installation Instructions for PyMeshLab:", icon='QUESTION')
-            box.label(text="1. Open Blender's System Console (Window > Toggle System Console)")
-            box.label(text="2. In console: import sys; print(sys.executable) to get Python path.")
-            box.label(text="3. In Administrator PowerShell/CMD:")
-            box.label(text="   & '<Blender_Python_Path>' -m pip install pymeshlab")
-            box.label(text="4. Restart Blender.")
-        else:
-            layout.label(text="PyMeshLab automation is disabled.", icon='CHECKBOX_DEHLT')
-            layout.prop(self, "meshlab_executable_path")
 

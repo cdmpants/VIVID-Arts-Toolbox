@@ -5,13 +5,50 @@ Blender add-on to automate photogrammetry asset preparation: LOD generation, cag
 ## Prerequisites
 
 - Blender 4.3
-- MeshLabServer 2020.06
+- meshoptimizer DLL at `vivid_arts_toolbox/lib/meshoptimizer.dll`
 - Adobe Substance 3D Designer (for headless baker)
-- Optional: PyMeshLab (instead of MeshLabServer)
 
 Notes:
-- Save your .blend before running operators. The add-on writes working files next to your .blend.
+- Save your .blend before running export operators.
 - External tools are optional; when disabled, features depending on them are hidden or produce helpful errors.
+
+## Build meshoptimizer DLL (step by step)
+
+The add-on expects a compiled meshoptimizer DLL at:
+
+- `vivid_arts_toolbox/lib/meshoptimizer.dll`
+
+Follow these steps from a terminal in the repo root:
+
+1) Clone meshoptimizer
+
+```powershell
+git clone https://github.com/zeux/meshoptimizer.git
+```
+
+2) Open a compiler-enabled shell
+
+- On Windows, use **Developer PowerShell for Visual Studio** (or any shell where `cl`/`clang++`/`g++` is available on PATH).
+
+3) Build the DLL using the add-on script
+
+```powershell
+python vivid_arts_toolbox/build_meshopt.py .\meshoptimizer
+```
+
+If `python` is not on PATH, use Blender's bundled Python instead:
+
+```powershell
+& "C:\Program Files\Blender Foundation\Blender 4.3\4.3\python\bin\python.exe" vivid_arts_toolbox/build_meshopt.py .\meshoptimizer
+```
+
+4) Verify output file exists
+
+```powershell
+Test-Path .\vivid_arts_toolbox\lib\meshoptimizer.dll
+```
+
+If this returns `True`, the add-on can use meshoptimizer decimation.
 
 ## Install and enable
 
@@ -20,7 +57,6 @@ Notes:
 
 ## Preferences you may need
 
-- MeshLab Server path or enable PyMeshLab automation
 - Substance Designer baker executable path (optional; defaults to the standard install path on Windows)
 - Asset destination/export locations (used by export operators)
 
