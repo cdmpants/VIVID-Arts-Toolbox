@@ -24,6 +24,10 @@ def _release_asset_dir(context):
     return os.path.join(os.path.dirname(blend_dir), 'Release', os.path.basename(blend_dir))
 
 
+def _is_locomotion_object(obj: bpy.types.Object) -> bool:
+    return any(collection.name == 'Locomotion' for collection in getattr(obj, 'users_collection', []) or [])
+
+
 class VIVID_OT_export_lods(bpy.types.Operator):
     bl_idname = "vivid.export_lods"
     bl_label = "Export LODs"
@@ -41,6 +45,7 @@ class VIVID_OT_export_lods(bpy.types.Operator):
 
         # Collect LOD objects: any *_LOD0..3 and *_ShadowProxy[_LOD*] and colliders
         lod_candidates = []
+        seen = set()
         for o in bpy.data.objects:
             if o.type != 'MESH':
                 continue
@@ -48,7 +53,10 @@ class VIVID_OT_export_lods(bpy.types.Operator):
             # Skip LOD Cages entirely (names like *_LOD#_Cage or in LOD_Cage collection)
             if "_Cage" in n or any(c.name == 'LOD_Cage' for c in getattr(o, 'users_collection', []) or []):
                 continue
-            if any(s in n for s in ["_LOD0", "_LOD1", "_LOD2", "_LOD3", "_ShadowProxy", "_MeshCollider", "_ConvexCollider"]):
+            if _is_locomotion_object(o) or any(s in n for s in ["_LOD0", "_LOD1", "_LOD2", "_LOD3", "_ShadowProxy", "_MeshCollider", "_ConvexCollider"]):
+                if o.name in seen:
+                    continue
+                seen.add(o.name)
                 lod_candidates.append(o)
 
         if not lod_candidates:

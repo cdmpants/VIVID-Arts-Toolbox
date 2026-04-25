@@ -66,12 +66,20 @@ You can find preferences under Edit → Preferences → Add-ons → VIVID Arts T
 
 - Source meshes for LODs live under a collection named “Cinema” (base) or “Cinema_Var#” (variants). Objects end with `_Cinema` or are named `Cinema`/`Cinema_Var#`.
 - LODs are imported into a collection named “LOD” (or `LOD_Var#` for variants) as objects suffixed `_LOD0 … _LOD3`.
+- Locomotion colliders live in a collection named `Locomotion` as meshes suffixed `_Locomotion`.
 - Cages live in “LOD_Cage” as copies named `<LOD>_Cage`.
 - Release mirror: The add-on reads/writes under a Release folder next to your .blend, e.g. `Release/Mesh`, `Release/Textures/LOD`.
 
 ## Panel overview (N‑panel → LOD)
 
 - Generate LODs: compute and import LOD0–3, collider and shadow proxies (optional).
+- Locomotion:
+	- Generate Locomotion samples the Cinema mesh from above into a top-down 2.5D grid, then smooths and optionally decimates the result.
+	- Sample Spacing controls the world-space resolution of the top-down grid.
+	- Smooth Iterations and Smooth Factor control how much the projected mesh is softened after sampling.
+	- Preserve Open Edges applies only to Locomotion generation and pins boundary edges during smoothing and final decimation.
+	- Final Reduction applies a last decimation pass after projection and smoothing.
+	- Re-running prompts before overwriting the existing `_Locomotion` mesh so manual cleanup is not lost by accident.
 - LOD Textures:
 	- Bake only LOD0 (default ON): restricts cage generation and baking to LOD0.
 	- Merge UDIMs (default ON): after per‑UDIM bakes, tiles are composited into a single square texture per map and the originals are removed. While enabled, “essential only” is disabled.
@@ -101,6 +109,7 @@ You can find preferences under Edit → Preferences → Add-ons → VIVID Arts T
 - At the end of setup, a Data Transfer modifier is added to LOD1–LOD3 (skipping LOD0) with the source set to LOD0. The mapping uses custom loop normals with `POLYINTERP_LNORPROJ`.
 - Optional extras:
 	- MeshCollider from LOD0 (decimated).
+	- Locomotion from Cinema (top-down projected into a 2.5D mesh, then smoothed and decimated for player-blocking use).
 	- ShadowProxy meshes per LOD, with independent ratios.
 - UV layers are renamed to `UVMap` (first) and `Lightmap` (second) when present.
 
@@ -138,7 +147,7 @@ You can find preferences under Edit → Preferences → Add-ons → VIVID Arts T
 
 - When “Merge UDIMs” is ON, the add‑on merges all UDIM tiles for each baked map into a single square texture per LOD (stored under `Release/Textures/LOD/<LOD>/`), named `<BaseName>_LOD#_<TextureType>.*` (e.g., `Rock_Cliff_LOD0_Normal.tif`).
 - On export (Export LODs), UVs for LOD meshes are remapped non‑destructively into a square N×N grid matching the merge order (UDIM ascending, row‑major). The original UVs are restored immediately after export.
-- Shadow proxies and colliders are exported without UV remapping.
+- Shadow proxies, colliders, and meshes in the `Locomotion` collection are exported without UV remapping.
 
 ## Troubleshooting
 
@@ -150,6 +159,7 @@ You can find preferences under Edit → Preferences → Add-ons → VIVID Arts T
 ## Operator IDs (for scripting)
 
 - Generate LODs: `vivid.setup_lods`
+- Generate Locomotion: `vivid.generate_locomotion`
 - Generate LOD Cages: `vivid.generate_lod_cages`
 - Bake LOD Textures: `vivid.bake_lod_textures`
 

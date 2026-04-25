@@ -22,6 +22,7 @@ from . import bake_textures
 
 # Operators (modules define operator classes; they don't register themselves)
 from .operators.generate_asset import VIVID_OT_generate_asset
+from .operators.generate_locomotion import VIVID_OT_generate_locomotion
 from .operators.setup_lods import VIVID_OT_setup_lods
 from .operators.export_asset import VIVID_OT_export_asset
 from .operators.warning_dialog import VIVID_OT_warning_dialog
@@ -50,6 +51,7 @@ _classes = (
     properties.VIVID_PG_LODProperties,
     VIVID_OT_warning_dialog,
     VIVID_OT_generate_asset,
+    VIVID_OT_generate_locomotion,
     VIVID_OT_setup_lods,
     VIVID_OT_export_asset,
     VIVID_OT_create_cinema_variant,

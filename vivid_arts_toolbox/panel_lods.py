@@ -39,6 +39,17 @@ class VIVID_PT_setup_lods(Panel):
             row.prop(s, "generate_collider")
             row = settings_col.row(align=True)
             row.prop(s, "collider_ratio", text="MeshCollider Ratio")
+            locomotion_box = settings_col.box()
+            locomotion_box.label(text="Locomotion")
+            locomotion_box.prop(s, "locomotion_voxel_size", text="Sample Spacing")
+            locomotion_box.prop(s, "locomotion_smooth_iterations", text="Smooth Iterations")
+            locomotion_box.prop(s, "locomotion_smooth_factor", text="Smooth Factor")
+            locomotion_box.prop(s, "locomotion_preserve_open_edges", text="Preserve Open Edges")
+            locomotion_box.prop(s, "locomotion_ratio", text="Final Reduction")
+            if hasattr(bpy.ops, "vivid") and hasattr(bpy.ops.vivid, "generate_locomotion"):
+                locomotion_box.operator("vivid.generate_locomotion", text="Generate Locomotion", icon='MESH_CYLINDER')
+            else:
+                locomotion_box.label(text="Operator vivid.generate_locomotion not registered.", icon='ERROR')
             # LOD targets: explicit LOD0 triangle count and ratios for LOD1–3 relative to LOD0
             col = settings_col.column(align=True)
             col.prop(s, "lod0_target_tris", text="LOD0 Target Tris")

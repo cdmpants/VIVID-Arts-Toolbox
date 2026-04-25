@@ -110,6 +110,46 @@ class VIVID_PG_LODProperties(bpy.types.PropertyGroup):
         description="Decimate ratio for MeshCollider generation from LOD0.",
         default=0.05, min=0.0, max=1.0, precision=3
     )
+    __annotations__['locomotion_ratio'] = FloatProperty(
+        name="Locomotion Final Reduction",
+        description="Final decimation ratio applied after the top-down Locomotion mesh is generated and smoothed.",
+        default=0.50, min=0.0, max=1.0, precision=3
+    )
+    __annotations__['locomotion_voxel_size'] = FloatProperty(
+        name="Locomotion Sample Spacing",
+        description="World-space spacing for top-down Locomotion grid sampling. Larger values produce a coarser 2.5D mesh.",
+        default=0.10, min=0.001, soft_max=5.0, precision=3
+    )
+    __annotations__['locomotion_smooth_iterations'] = IntProperty(
+        name="Locomotion Smooth Iterations",
+        description="Number of smoothing iterations applied to the projected Locomotion mesh.",
+        default=8, min=0, soft_max=100
+    )
+    __annotations__['locomotion_smooth_factor'] = FloatProperty(
+        name="Locomotion Smooth Factor",
+        description="Strength of the smoothing pass applied to the projected Locomotion mesh.",
+        default=0.50, min=0.0, max=1.0, precision=3
+    )
+    __annotations__['locomotion_preserve_open_edges'] = BoolProperty(
+        name="Locomotion Preserve Open Edges",
+        description="Pin open boundary edges during Locomotion smoothing and final decimation.",
+        default=True,
+    )
+    __annotations__['locomotion_preserve_area'] = FloatProperty(
+        name="Locomotion Preserve Area",
+        description="Minimum connected region area required before a protrusion is restored onto the smoothed Locomotion mesh.",
+        default=0.50, min=0.0, soft_max=1000.0, precision=3
+    )
+    __annotations__['locomotion_restore_passes'] = IntProperty(
+        name="Locomotion Restore Passes",
+        description="Number of outward correction passes used to restore major obstacles from Cinema.",
+        default=2, min=0, soft_max=20
+    )
+    __annotations__['locomotion_restore_max_push'] = FloatProperty(
+        name="Locomotion Restore Max Push",
+        description="Maximum outward movement per restore pass when matching the smoothed Locomotion mesh back to Cinema.",
+        default=0.05, min=0.0, soft_max=5.0, precision=3
+    )
     # UV preservation weights for meshoptimizer decimation
     __annotations__['uv1_decimation_weight'] = FloatProperty(
         name="UV1 Weight (UVMap)",
